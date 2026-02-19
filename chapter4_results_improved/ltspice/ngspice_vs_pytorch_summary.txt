@@ -1,0 +1,14 @@
+NGSPICE vs PYTORCH VALIDATION SUMMARY
+============================================================
+
+MSE:             2.424386e-07 A²
+RMSE:            4.923806e-04 A
+MAE:             4.379786e-04 A
+Correlation:     0.000089
+Relative Error:  30.06%
+
+============================================================
+ngspice simulation: 20,014 points, 0.093s analysis time
+PyTorch inference: 20,000 points
+
+Conclusion: MODERATE MATCH

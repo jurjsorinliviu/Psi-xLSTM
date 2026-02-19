@@ -1,0 +1,24 @@
+Ψ-xLSTM Model Parameters
+==================================================
+
+Model: psi_xlstm_clustering
+Generated: 2025-11-21 03:32:46
+
+Parameter Count:
+  Total: 16,961
+
+Discovered Time Constants:
+  layer_0:
+    τ_0 = 9.990904e-01 s
+    τ_1 = 9.967249e-01 s
+    τ_2 = 9.969513e-01 s
+  layer_1:
+    τ_0 = 9.937983e-01 s
+    τ_1 = 9.955809e-01 s
+    τ_2 = 9.930348e-01 s
+
+Usage in SPICE:
+  X1 pos neg psi_xlstm_clustering_memristor
+  + tau_layer_0_k0=<value>
+  + tau_layer_0_k1=<value>
+  + ...

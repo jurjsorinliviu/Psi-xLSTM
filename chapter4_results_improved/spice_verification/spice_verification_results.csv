@@ -1,0 +1,3 @@
+Model,Execution Time (μs),Throughput (MSamples/s),MSE vs Ground Truth,Correlation
+Clustering (PyTorch),1012.01 ± 143.16,0.99,3.78e-07,0.263167
+Clustering (SPICE Analytical),2907.83 ± 137.83,0.34,3.78e-07,0.263167

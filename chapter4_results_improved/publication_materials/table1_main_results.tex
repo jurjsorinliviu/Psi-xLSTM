@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+\centering
+\caption{Performance comparison of Ψ-xLSTM models on high-frequency memristor dynamics (50-150 kHz, 3\% noise). Results averaged over 3 random seeds.}
+\label{tab:main_results}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Model} & \textbf{Parameters} & \textbf{MSE ($\times 10^{-8}$)} & \textbf{HF-Error ($\times 10^{-7}$)} & \textbf{Latency (μs)} \\
+\hline
+Baseline PINN & 8,577 & $7.90 \pm 2.70$ & $1.21 \pm 0.08$ & $0.191 \pm 0.007$ \\
+xLSTM-PINN Teacher & 46,409 & $7.44 \pm 1.62$ & $1.33 \pm 0.11$ & $0.107 \pm 0.019$ \\
+Ψ-xLSTM Clustering & 16,961 & $7.55 \pm 2.88$ & $1.22 \pm 0.08$ & $0.014 \pm 0.000$ \\
+Ψ-xLSTM Low-Rank & 7,377 & $16.62 \pm 0.04$ & $1.46 \pm 0.00$ & $0.026 \pm 0.001$ \\
+\hline
+\end{tabular}
+\end{table}

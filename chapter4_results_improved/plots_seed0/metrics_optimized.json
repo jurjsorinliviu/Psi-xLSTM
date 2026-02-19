@@ -1,0 +1,131 @@
+{
+  "baseline_pinn": {
+    "model_name": "baseline_pinn",
+    "time_domain": {
+      "mse": 1.1533211363712326e-07,
+      "mae": 0.0002329899143660441,
+      "rmse": 0.00033960581640712917
+    },
+    "spectral": {
+      "spectral_mse": 7.628970372097754e-12,
+      "spectral_mae": 1.7728737589095545e-07,
+      "high_freq_error": 1.3161050560484e-07,
+      "low_freq_error": 4.033962977700867e-05,
+      "freq_correlation": 0.9071227858203396
+    },
+    "compression": {
+      "model_name": "baseline_pinn",
+      "total_parameters": 8577,
+      "model_size_mb": 0.032718658447265625,
+      "compression_ratio": 0.18481329052554463,
+      "reduction_percent": 81.51867094744554
+    },
+    "speed": {
+      "mean_time_ms": 0.2039799967315048,
+      "std_time_ms": 0.3652509881312959,
+      "min_time_ms": 0.12680000509135425,
+      "max_time_ms": 2.6870000001508743,
+      "latency_per_sample_ms": 0.00019919921555811015,
+      "throughput_samples_per_sec": 5020100.09024499,
+      "batch_size_used": 1024
+    }
+  },
+  "teacher": {
+    "model_name": "teacher",
+    "time_domain": {
+      "mse": 8.612149571263217e-08,
+      "mae": 0.00021821814880240709,
+      "rmse": 0.000293464632704854
+    },
+    "spectral": {
+      "spectral_mse": 5.272247482340786e-12,
+      "spectral_mae": 1.6078961095900013e-07,
+      "high_freq_error": 1.2223981116221694e-07,
+      "low_freq_error": 3.4493397834012285e-05,
+      "freq_correlation": 0.9100665582916683
+    },
+    "compression": {
+      "model_name": "teacher",
+      "total_parameters": 46409,
+      "model_size_mb": 0.17703628540039062,
+      "compression_ratio": 1.0,
+      "reduction_percent": 0.0
+    },
+    "speed": {
+      "mean_time_ms": 4.799225997412577,
+      "std_time_ms": 0.25305352354441213,
+      "min_time_ms": 4.56490000942722,
+      "max_time_ms": 5.497699981788173,
+      "latency_per_sample_ms": 7.998709995687628e-05,
+      "throughput_samples_per_sec": 12502015.956812203,
+      "batch_size_used": 60000
+    }
+  },
+  "psi_xlstm_clustering": {
+    "model_name": "psi_xlstm_clustering",
+    "time_domain": {
+      "mse": 1.1524373633164942e-07,
+      "mae": 0.00023900746600702405,
+      "rmse": 0.00033947566407732666
+    },
+    "spectral": {
+      "spectral_mse": 7.506615121166682e-12,
+      "spectral_mae": 1.7218056314050045e-07,
+      "high_freq_error": 1.2930608761507756e-07,
+      "low_freq_error": 3.82220750907436e-05,
+      "freq_correlation": 0.8373590992765989
+    },
+    "compression": {
+      "model_name": "psi_xlstm_clustering",
+      "total_parameters": 16961,
+      "model_size_mb": 0.06470108032226562,
+      "compression_ratio": 0.36546790493223297,
+      "reduction_percent": 63.45320950677671,
+      "original_parameters": 16961,
+      "compressed_parameters": 14919
+    },
+    "speed": {
+      "mean_time_ms": 0.8536899992031977,
+      "std_time_ms": 0.13099456251193478,
+      "min_time_ms": 0.7808000082150102,
+      "max_time_ms": 1.3472000136971474,
+      "latency_per_sample_ms": 1.4228166653386627e-05,
+      "throughput_samples_per_sec": 70283123.91617772,
+      "batch_size_used": 60000
+    }
+  },
+  "psi_xlstm_lowrank": {
+    "model_name": "psi_xlstm_lowrank",
+    "time_domain": {
+      "mse": 1.6681704551047005e-07,
+      "mae": 0.00029183540027588606,
+      "rmse": 0.00040843241731636226
+    },
+    "spectral": {
+      "spectral_mse": 1.1239933463136342e-11,
+      "spectral_mae": 2.01149177314619e-07,
+      "high_freq_error": 1.4603647002786602e-07,
+      "low_freq_error": 4.888664261670783e-05,
+      "freq_correlation": 0.1837588916282148
+    },
+    "compression": {
+      "model_name": "psi_xlstm_lowrank",
+      "total_parameters": 7377,
+      "model_size_mb": 0.028141021728515625,
+      "compression_ratio": 0.5,
+      "reduction_percent": 84.10437630631989,
+      "matrix_memory_full": 512,
+      "matrix_memory_compressed": 256,
+      "compression_percentage": 50.0
+    },
+    "speed": {
+      "mean_time_ms": 1.5542460005963221,
+      "std_time_ms": 0.30928455333023586,
+      "min_time_ms": 1.366299984510988,
+      "max_time_ms": 2.637400000821799,
+      "latency_per_sample_ms": 2.59041000099387e-05,
+      "throughput_samples_per_sec": 38603927.54877904,
+      "batch_size_used": 60000
+    }
+  }
+}

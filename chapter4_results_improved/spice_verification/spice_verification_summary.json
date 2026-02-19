@@ -1,0 +1,15 @@
+{
+  "comparison_metrics": {
+    "mse": 3.779841993389591e-07,
+    "mae": 0.0003972718827846199,
+    "rmse": 0.0006148041959347376,
+    "relative_error": 1.006464922537042,
+    "correlation": 0.26316655488930385
+  },
+  "pytorch_speed_us": 1012.0099998312071,
+  "spice_speed_us": 2907.82900119666,
+  "speedup_factor": 0.3480294059295557,
+  "num_samples": 20000,
+  "sampling_rate_MHz": 20.0,
+  "test_duration_ms": 1.0
+}

@@ -1,0 +1,54 @@
+* Psi-xLSTM Memristor Model - LTspice Netlist
+* Converted from Verilog-A behavioral model
+
+* Input voltage source (multi-frequency test signal)
+Vin p 0 SINE(0 2 50k)
+
+* State variable capacitors
+C0 s0 0 {tau0_k0} IC=0
+C1 s1 0 {tau1_k0} IC=0  
+C2 s2 0 1m IC=0
+
+* State evolution equations
+B_state0_k0 0 s0 I=tanh(V(p) + V(s0)) - V(s0)
+B_state0_k1 0 s0 I=(tanh(V(p) + V(s0)) - V(s0)) * {tau0_k0/tau0_k1}
+B_state0_k2 0 s0 I=(tanh(V(p) + V(s0)) - V(s0)) * {tau0_k0/tau0_k2}
+
+B_state1_k0 0 s1 I=tanh(V(p) + V(s1)) - V(s1)
+B_state1_k1 0 s1 I=(tanh(V(p) + V(s1)) - V(s1)) * {tau1_k0/tau1_k1}
+B_state1_k2 0 s1 I=(tanh(V(p) + V(s1)) - V(s1)) * {tau1_k0/tau1_k2}
+
+* Internal state variable
+B_w_internal w_mem 0 V=0.5*(1 + tanh(V(s0) + 0.3*V(s1) + 0.1*V(s2)))
+
+* Output current
+B_output p n I=V(p) * (V(w_mem)*{G_on} + (1-V(w_mem))*{G_off}) * {I_scale}
+
+* Load resistor
+R_load n 0 1k
+
+* Parameters
+.param tau0_k0=9.990904e-1
+.param tau0_k1=9.967249e-1
+.param tau0_k2=9.969513e-1
+.param tau1_k0=9.937983e-1
+.param tau1_k1=9.955809e-1
+.param tau1_k2=9.930348e-1
+.param G_on=0.01
+.param G_off=0.0001
+.param I_scale=1e-3
+
+* Transient analysis
+.tran 50n 1m uic
+
+* Export data
+.control
+run
+set wr_singlescale
+set wr_vecnames
+option numdgt=7
+wrdata chapter4_results_improved/ltspice/ngspice_waveforms.txt time v(p) v(s0) v(s1) v(w_mem) v(n)
+quit
+.endc
+
+.end

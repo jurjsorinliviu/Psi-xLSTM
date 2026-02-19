@@ -1,0 +1,60 @@
+* Ψ-xLSTM Memristor Model - LTspice Netlist
+* Converted from Verilog-A behavioral model
+* Implements time-constant clustered recurrent network
+
+* Input voltage source (multi-frequency test signal)
+Vin p 0 SINE(0 2 50k)
+
+* State variable capacitors (time constants)
+* C = τ to match ddt() equations from Verilog-A
+C0 s0 0 {tau0_k0} IC=0
+C1 s1 0 {tau1_k0} IC=0  
+C2 s2 0 1m IC=0
+
+* State evolution equations
+* Layer 0, cluster 0: ddt(s0) = (tanh(Vin + s0) - s0) / tau0_k0
+* Implemented as: I = C * dV/dt, with C = tau0_k0
+* So: I = tanh(Vin + V(s0)) - V(s0)
+B_state0_k0 0 s0 I=tanh(V(p) + V(s0)) - V(s0)
+B_state0_k1 0 s0 I=(tanh(V(p) + V(s0)) - V(s0)) * {tau0_k0/tau0_k1}
+B_state0_k2 0 s0 I=(tanh(V(p) + V(s0)) - V(s0)) * {tau0_k0/tau0_k2}
+
+* Layer 1, cluster 0: ddt(s1) = (tanh(Vin + s1) - s1) / tau1_k0  
+B_state1_k0 0 s1 I=tanh(V(p) + V(s1)) - V(s1)
+B_state1_k1 0 s1 I=(tanh(V(p) + V(s1)) - V(s1)) * {tau1_k0/tau1_k1}
+B_state1_k2 0 s1 I=(tanh(V(p) + V(s1)) - V(s1)) * {tau1_k0/tau1_k2}
+
+* Internal state variable (normalized 0-1)
+* w_mem = 0.5 * (1 + tanh(s0 + 0.3*s1 + 0.1*s2))
+B_w_internal w_mem 0 V=0.5*(1 + tanh(V(s0) + 0.3*V(s1) + 0.1*V(s2)))
+
+* Output current (state-dependent conductance)
+* I_out = V_in * (w_mem * G_on + (1 - w_mem) * G_off) * I_scale
+B_output p n I=V(p) * (V(w_mem)*{G_on} + (1-V(w_mem))*{G_off}) * {I_scale}
+
+* Load resistor for measurement
+R_load n 0 1k
+
+* Time constants (from trained model)
+.param tau0_k0=9.990904e-1
+.param tau0_k1=9.967249e-1
+.param tau0_k2=9.969513e-1
+.param tau1_k0=9.937983e-1
+.param tau1_k1=9.955809e-1
+.param tau1_k2=9.930348e-1
+
+* Conductance parameters
+.param G_on=0.01
+.param G_off=0.0001
+.param I_scale=1e-3
+
+* Transient analysis (1ms, max timestep 50ns for 20MHz sampling)
+.tran 50n 1m uic
+
+* Save key signals
+.save V(p) V(s0) V(s1) V(s2) V(w_mem) I(B_output)
+
+* Measure output current RMS
+.meas TRAN I_rms RMS I(B_output) FROM=0 TO=1m
+
+.end
