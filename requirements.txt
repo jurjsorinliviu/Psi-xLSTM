@@ -1,0 +1,26 @@
+# Ψ-xLSTM Requirements
+# Chapter 4 Implementation
+
+# Core dependencies
+torch>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+matplotlib>=3.7.0
+tqdm>=4.65.0
+
+# Machine learning
+scikit-learn>=1.3.0
+
+# Data handling
+pandas>=2.0.0
+
+# Utilities
+dataclasses>=0.6; python_version < '3.7'
+
+# Optional: For CUDA support
+# torch-cuda>=2.0.0
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
