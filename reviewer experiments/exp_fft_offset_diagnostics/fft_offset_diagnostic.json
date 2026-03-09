@@ -1,0 +1,7 @@
+{
+  "dc_offset": 1.4912712686054874e-05,
+  "raw_hf_mismatch_db": 13.76990032196045,
+  "demeaned_hf_mismatch_db": 13.76990032196045,
+  "windowed_hf_mismatch_db": 10.768437187409399,
+  "inference_comment": "Large reduction from raw->demeaned suggests DC offset contribution. Reduction from demeaned->windowed suggests spectral leakage/bin alignment contribution."
+}
