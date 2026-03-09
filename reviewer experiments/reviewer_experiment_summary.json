@@ -1,0 +1,613 @@
+{
+  "config": {
+    "device": "cuda",
+    "quick": false,
+    "epochs": 30,
+    "batch_size": 512,
+    "seed": 42,
+    "use_ngspice_active_data": true,
+    "ngspice_bin": "C:/ngspice/bin/ngspice.exe",
+    "ngspice_mos_model": "bsim4",
+    "experimental_suite_json": "C:\\Users\\jurjs\\Desktop\\PostDoc pmTUC\\Papers ideas\\Psi-xLSTM paper\\reviewer_public_suite.auto.json",
+    "experimental_suite_auto_download": true,
+    "auto_install_optional_deps": true,
+    "use_default_public_suite": true
+  },
+  "experiments": {
+    "sigmoid_vs_exponential": [
+      {
+        "model": "sigmoid_gate_rnn",
+        "mse": 2.744346971894629e-10,
+        "mae": 1.353522384306416e-05,
+        "rmse": 1.6566070662334593e-05,
+        "hf_mismatch_db": 4.669274806976318,
+        "lf_mismatch_db": 1.149554967880249,
+        "dc_offset": 7.471317076124251e-07,
+        "latency_us_per_sample": 0.19013021983482759,
+        "parameters": 66305
+      },
+      {
+        "model": "exp_gate_rnn",
+        "mse": 6.615887282457322e-10,
+        "mae": 2.1626465240842663e-05,
+        "rmse": 2.5721367153511342e-05,
+        "hf_mismatch_db": 4.776666641235352,
+        "lf_mismatch_db": 1.257036566734314,
+        "dc_offset": -2.021135514951311e-05,
+        "latency_us_per_sample": 0.3733072882520598,
+        "parameters": 66305
+      }
+    ],
+    "spectral_baseline_comparison": [
+      {
+        "model": "baseline_pinn",
+        "mse": 1.4671538650645743e-08,
+        "mae": 6.377619865816087e-05,
+        "rmse": 0.00012112612703560592,
+        "hf_mismatch_db": 15.379706382751465,
+        "lf_mismatch_db": 6.47920036315918,
+        "dc_offset": -9.704848707769997e-06,
+        "latency_us_per_sample": 0.14892741546645993,
+        "parameters": 19009
+      },
+      {
+        "model": "fourier_pinn",
+        "mse": 1.5251199414478833e-08,
+        "mae": 7.239943079184741e-05,
+        "rmse": 0.00012349574654407672,
+        "hf_mismatch_db": 12.30139446258545,
+        "lf_mismatch_db": 6.079797744750977,
+        "dc_offset": 2.467068043188192e-06,
+        "latency_us_per_sample": 0.08743326513164598,
+        "parameters": 57857
+      },
+      {
+        "model": "siren_pinn",
+        "mse": 2.222193806744599e-08,
+        "mae": 0.00010266684694215655,
+        "rmse": 0.00014907024541284552,
+        "hf_mismatch_db": 19.85048484802246,
+        "lf_mismatch_db": 6.194868087768555,
+        "dc_offset": 1.4026739336259197e-05,
+        "latency_us_per_sample": 0.09494303109628768,
+        "parameters": 33537
+      },
+      {
+        "model": "exp_gate_rnn",
+        "mse": 1.4083989974267297e-08,
+        "mae": 6.55945113976486e-05,
+        "rmse": 0.00011867598735324387,
+        "hf_mismatch_db": 14.540933609008789,
+        "lf_mismatch_db": 6.39250373840332,
+        "dc_offset": -1.6183170373551548e-05,
+        "latency_us_per_sample": 0.23860189154826605,
+        "parameters": 66305
+      },
+      {
+        "model": "xlstm_teacher_mlstm",
+        "mse": 1.7739981927888948e-08,
+        "mae": 7.947547419462353e-05,
+        "rmse": 0.0001331915234836247,
+        "hf_mismatch_db": 11.066753387451172,
+        "lf_mismatch_db": 5.833770751953125,
+        "dc_offset": -1.1396815352782141e-05,
+        "latency_us_per_sample": 0.3191406335645297,
+        "parameters": 46409
+      },
+      {
+        "model": "clustering_student",
+        "mse": 1.3515259134067037e-08,
+        "mae": 6.841993308626115e-05,
+        "rmse": 0.00011625514669926247,
+        "hf_mismatch_db": 14.478635787963867,
+        "lf_mismatch_db": 5.994225025177002,
+        "dc_offset": -1.1587358130782377e-05,
+        "latency_us_per_sample": 0.1835465430607049,
+        "parameters": 16961
+      },
+      {
+        "model": "lowrank_mlstm",
+        "mse": 6.487160675305859e-08,
+        "mae": 0.00018745621491689235,
+        "rmse": 0.0002546990513391414,
+        "hf_mismatch_db": 184.88021850585938,
+        "lf_mismatch_db": 217.9917755126953,
+        "dc_offset": 3.522513907228131e-06,
+        "latency_us_per_sample": 0.4240999411801264,
+        "parameters": 7377
+      }
+    ],
+    "multidevice_validation": {
+      "memristor": [
+        {
+          "device": "memristor",
+          "model": "baseline_pinn",
+          "mse": 1.3782867291922685e-08,
+          "mae": 6.681775994366035e-05,
+          "rmse": 0.00011740045694937769,
+          "hf_mismatch_db": 14.046542167663574,
+          "lf_mismatch_db": 6.094391822814941,
+          "dc_offset": 1.1586749678826891e-05,
+          "latency_us_per_sample": 0.13367186966206646,
+          "parameters": 19009
+        },
+        {
+          "device": "memristor",
+          "model": "fourier_pinn",
+          "mse": 1.5083914561841993e-08,
+          "mae": 7.081212243065238e-05,
+          "rmse": 0.00012281658911499698,
+          "hf_mismatch_db": 11.81473159790039,
+          "lf_mismatch_db": 6.284217357635498,
+          "dc_offset": -3.7733166209363844e-06,
+          "latency_us_per_sample": 0.09708984407552634,
+          "parameters": 57857
+        },
+        {
+          "device": "memristor",
+          "model": "exp_gate_rnn",
+          "mse": 1.5110352080682787e-08,
+          "mae": 6.449875945691019e-05,
+          "rmse": 0.00012292417207645853,
+          "hf_mismatch_db": 15.441964149475098,
+          "lf_mismatch_db": 6.579012393951416,
+          "dc_offset": -1.6191250324482098e-05,
+          "latency_us_per_sample": 0.19425456230237614,
+          "parameters": 66305
+        }
+      ],
+      "mosfet": [
+        {
+          "device": "mosfet",
+          "model": "baseline_pinn",
+          "mse": 7.328935236472489e-10,
+          "mae": 2.0134250007686205e-05,
+          "rmse": 2.7072006273035047e-05,
+          "hf_mismatch_db": 4.654109477996826,
+          "lf_mismatch_db": 1.0100764036178589,
+          "dc_offset": 4.464760422706604e-06,
+          "latency_us_per_sample": 0.0669938155321385,
+          "parameters": 19105
+        },
+        {
+          "device": "mosfet",
+          "model": "fourier_pinn",
+          "mse": 4.453781698998682e-08,
+          "mae": 0.0001705664035398513,
+          "rmse": 0.00021103984692466687,
+          "hf_mismatch_db": 18.45197868347168,
+          "lf_mismatch_db": 3.644590139389038,
+          "dc_offset": -0.00012141821207478642,
+          "latency_us_per_sample": 0.09944662148579178,
+          "parameters": 57857
+        },
+        {
+          "device": "mosfet",
+          "model": "exp_gate_rnn",
+          "mse": 2.9953362012946627e-10,
+          "mae": 1.3568380381911993e-05,
+          "rmse": 1.730703961194595e-05,
+          "hf_mismatch_db": 4.632986068725586,
+          "lf_mismatch_db": 0.30624109506607056,
+          "dc_offset": -3.933266270905733e-06,
+          "latency_us_per_sample": 0.19616211375250714,
+          "parameters": 66369
+        }
+      ],
+      "bjt": [
+        {
+          "device": "bjt",
+          "model": "baseline_pinn",
+          "mse": 1.0268234973409562e-07,
+          "mae": 0.0002634885022416711,
+          "rmse": 0.0003204408677651707,
+          "hf_mismatch_db": 12.41002082824707,
+          "lf_mismatch_db": 5.5282440185546875,
+          "dc_offset": 1.5827245078980923e-05,
+          "latency_us_per_sample": 0.1424251233099009,
+          "parameters": 19105
+        },
+        {
+          "device": "bjt",
+          "model": "fourier_pinn",
+          "mse": 1.7716355049657295e-09,
+          "mae": 3.170906347804703e-05,
+          "rmse": 4.209080071661419e-05,
+          "hf_mismatch_db": 10.79378890991211,
+          "lf_mismatch_db": 1.7049100399017334,
+          "dc_offset": 7.840688340365887e-06,
+          "latency_us_per_sample": 0.09333167933315659,
+          "parameters": 57857
+        },
+        {
+          "device": "bjt",
+          "model": "exp_gate_rnn",
+          "mse": 3.011112070794297e-08,
+          "mae": 0.00013597226643469185,
+          "rmse": 0.00017352556211677568,
+          "hf_mismatch_db": 11.226712226867676,
+          "lf_mismatch_db": 2.983832597732544,
+          "dc_offset": -0.00013510941062122583,
+          "latency_us_per_sample": 0.25726887997734593,
+          "parameters": 66369
+        }
+      ]
+    },
+    "fft_offset_diagnostics": {
+      "dc_offset": 1.4912712686054874e-05,
+      "raw_hf_mismatch_db": 13.76990032196045,
+      "demeaned_hf_mismatch_db": 13.76990032196045,
+      "windowed_hf_mismatch_db": 10.768437187409399,
+      "inference_comment": "Large reduction from raw->demeaned suggests DC offset contribution. Reduction from demeaned->windowed suggests spectral leakage/bin alignment contribution."
+    },
+    "dc_iv_matching": {
+      "mosfet": [
+        {
+          "curve": "Vds=0.05V",
+          "rmse": 0.0009604563072508247
+        },
+        {
+          "curve": "Vds=0.50V",
+          "rmse": 0.0008734278851886226
+        },
+        {
+          "curve": "Vds=1.00V",
+          "rmse": 0.001356629916137587
+        },
+        {
+          "curve": "Vds=1.50V",
+          "rmse": 0.0014572817454084983
+        }
+      ],
+      "bjt": [
+        {
+          "curve": "Vce=0.10V",
+          "rmse": 2.4492266950804025
+        },
+        {
+          "curve": "Vce=1.00V",
+          "rmse": 2.4727216031784307
+        },
+        {
+          "curve": "Vce=2.00V",
+          "rmse": 2.499891820079806
+        },
+        {
+          "curve": "Vce=3.00V",
+          "rmse": 2.527791830894357
+        }
+      ]
+    },
+    "active_small_large_signal": {
+      "small_signal_rows": 40,
+      "small_signal_summary": {
+        "mean_S21_db_abs_err": 5.931192197349951,
+        "mean_S21_phase_abs_err_deg": 15.537958723231224,
+        "mean_Y21_mag_err_pct": 112.44787955242728
+      },
+      "large_signal_thd": {
+        "fundamental_hz": 150000.0,
+        "thd_ref": 0.4930651072145,
+        "thd_pred": 0.4925381636118443,
+        "thd_abs_err": 0.0005269436026556495
+      }
+    },
+    "experimental_csv_validation:zenodo_12656947_raw": {
+      "csv_path": "reviewer experiments\\exp_experimental_suite\\public_memristor_suite\\downloads\\zenodo_12656947_raw\\auto_selected.csv",
+      "input_cols": [
+        "Voltage",
+        "Voltage.1"
+      ],
+      "target_col": "Current",
+      "time_col": null,
+      "group_col": "",
+      "metrics": [
+        {
+          "model": "baseline_pinn",
+          "mse": 3.7429122130561154e-06,
+          "mae": 0.001665518619120121,
+          "rmse": 0.0019346607488281028,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 47.30953598022461,
+          "dc_offset": 0.00027603821945376694,
+          "latency_us_per_sample": 5.349462291085591,
+          "parameters": 19105
+        },
+        {
+          "model": "fourier_pinn",
+          "mse": 3.315576395834796e-05,
+          "mae": 0.004466612823307514,
+          "rmse": 0.005758104198288527,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 58.75654983520508,
+          "dc_offset": 0.003211029339581728,
+          "latency_us_per_sample": 7.160430804135338,
+          "parameters": 57857
+        },
+        {
+          "model": "exp_gate_rnn",
+          "mse": 1.666851829895677e-07,
+          "mae": 0.00033367887954227626,
+          "rmse": 0.00040827096760554464,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 31.639753341674805,
+          "dc_offset": 0.00030520555446855724,
+          "latency_us_per_sample": 13.23946215893312,
+          "parameters": 66369
+        }
+      ]
+    },
+    "experimental_csv_validation:zenodo_17481788": {
+      "csv_path": "reviewer experiments\\exp_experimental_suite\\public_memristor_suite\\downloads\\zenodo_17481788\\auto_selected.csv",
+      "input_cols": [
+        "AV"
+      ],
+      "target_col": "AI",
+      "time_col": "time",
+      "group_col": "",
+      "metrics": [
+        {
+          "model": "baseline_pinn",
+          "mse": 1.1370646461728029e-05,
+          "mae": 0.0033380594104528427,
+          "rmse": 0.003372038917587997,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 30.07941436767578,
+          "dc_offset": 0.0033380596432834864,
+          "latency_us_per_sample": 3.097258266751413,
+          "parameters": 19009
+        },
+        {
+          "model": "fourier_pinn",
+          "mse": 3.0440678528975695e-05,
+          "mae": 0.004448863212019205,
+          "rmse": 0.005517307180951202,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 53.02312469482422,
+          "dc_offset": 0.0014801464276388288,
+          "latency_us_per_sample": 9.544443822017422,
+          "parameters": 57857
+        },
+        {
+          "model": "exp_gate_rnn",
+          "mse": 0.00012005453754682094,
+          "mae": 0.00930926576256752,
+          "rmse": 0.010956940154387125,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 49.34723663330078,
+          "dc_offset": -0.009250127710402012,
+          "latency_us_per_sample": 11.124295803407827,
+          "parameters": 66305
+        }
+      ]
+    },
+    "experimental_csv_validation:kit_radar_memristor": {
+      "csv_path": "reviewer experiments\\exp_experimental_suite\\public_memristor_suite\\downloads\\kit_radar_memristor\\auto_selected.csv",
+      "input_cols": [
+        "R_on"
+      ],
+      "target_col": "R_off",
+      "time_col": null,
+      "group_col": "",
+      "metrics": [
+        {
+          "model": "baseline_pinn",
+          "mse": 8402505728.0,
+          "mae": 82739.453125,
+          "rmse": 91665.18274677687,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 132.083251953125,
+          "dc_offset": -82739.4453125,
+          "latency_us_per_sample": 7.685294429607251,
+          "parameters": 19009
+        },
+        {
+          "model": "fourier_pinn",
+          "mse": 8403333120.0,
+          "mae": 82744.6875,
+          "rmse": 91669.69575601307,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 86.38121032714844,
+          "dc_offset": -82744.6796875,
+          "latency_us_per_sample": 16.118429473363886,
+          "parameters": 57857
+        },
+        {
+          "model": "exp_gate_rnn",
+          "mse": 8403491328.0,
+          "mae": 82745.4140625,
+          "rmse": 91670.55867616386,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 122.3773193359375,
+          "dc_offset": -82745.3984375,
+          "latency_us_per_sample": 27.599605713404863,
+          "parameters": 66305
+        }
+      ]
+    },
+    "experimental_suite": {
+      "suite_json": "C:\\Users\\jurjs\\Desktop\\PostDoc pmTUC\\Papers ideas\\Psi-xLSTM paper\\reviewer_public_suite.auto.json",
+      "suite_name": "public_memristor_suite",
+      "num_datasets": 3,
+      "datasets": {
+        "zenodo_12656947_raw": {
+          "csv_path": "reviewer experiments\\exp_experimental_suite\\public_memristor_suite\\downloads\\zenodo_12656947_raw\\auto_selected.csv",
+          "input_cols": [
+            "Voltage",
+            "Voltage.1"
+          ],
+          "target_col": "Current",
+          "time_col": null,
+          "group_col": null,
+          "best_model_hf_then_rmse": "exp_gate_rnn",
+          "metrics": [
+            {
+              "model": "baseline_pinn",
+              "mse": 3.7429122130561154e-06,
+              "mae": 0.001665518619120121,
+              "rmse": 0.0019346607488281028,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 47.30953598022461,
+              "dc_offset": 0.00027603821945376694,
+              "latency_us_per_sample": 5.349462291085591,
+              "parameters": 19105
+            },
+            {
+              "model": "fourier_pinn",
+              "mse": 3.315576395834796e-05,
+              "mae": 0.004466612823307514,
+              "rmse": 0.005758104198288527,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 58.75654983520508,
+              "dc_offset": 0.003211029339581728,
+              "latency_us_per_sample": 7.160430804135338,
+              "parameters": 57857
+            },
+            {
+              "model": "exp_gate_rnn",
+              "mse": 1.666851829895677e-07,
+              "mae": 0.00033367887954227626,
+              "rmse": 0.00040827096760554464,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 31.639753341674805,
+              "dc_offset": 0.00030520555446855724,
+              "latency_us_per_sample": 13.23946215893312,
+              "parameters": 66369
+            }
+          ],
+          "notes": "Raw memristor data from 20 devices. Auto resolver downloads/extracts archive and selects tabular IV file.",
+          "source_url": "https://zenodo.org/records/12656947"
+        },
+        "zenodo_17481788": {
+          "csv_path": "reviewer experiments\\exp_experimental_suite\\public_memristor_suite\\downloads\\zenodo_17481788\\auto_selected.csv",
+          "input_cols": [
+            "AV"
+          ],
+          "target_col": "AI",
+          "time_col": "time",
+          "group_col": null,
+          "best_model_hf_then_rmse": "baseline_pinn",
+          "metrics": [
+            {
+              "model": "baseline_pinn",
+              "mse": 1.1370646461728029e-05,
+              "mae": 0.0033380594104528427,
+              "rmse": 0.003372038917587997,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 30.07941436767578,
+              "dc_offset": 0.0033380596432834864,
+              "latency_us_per_sample": 3.097258266751413,
+              "parameters": 19009
+            },
+            {
+              "model": "fourier_pinn",
+              "mse": 3.0440678528975695e-05,
+              "mae": 0.004448863212019205,
+              "rmse": 0.005517307180951202,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 53.02312469482422,
+              "dc_offset": 0.0014801464276388288,
+              "latency_us_per_sample": 9.544443822017422,
+              "parameters": 57857
+            },
+            {
+              "model": "exp_gate_rnn",
+              "mse": 0.00012005453754682094,
+              "mae": 0.00930926576256752,
+              "rmse": 0.010956940154387125,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 49.34723663330078,
+              "dc_offset": -0.009250127710402012,
+              "latency_us_per_sample": 11.124295803407827,
+              "parameters": 66305
+            }
+          ],
+          "notes": "Public memristor dataset. Auto resolver downloads xlsx and converts selected sheet to CSV.",
+          "source_url": "https://zenodo.org/records/17481788"
+        },
+        "kit_radar_memristor": {
+          "csv_path": "reviewer experiments\\exp_experimental_suite\\public_memristor_suite\\downloads\\kit_radar_memristor\\auto_selected.csv",
+          "input_cols": [
+            "R_on"
+          ],
+          "target_col": "R_off",
+          "time_col": null,
+          "group_col": null,
+          "best_model_hf_then_rmse": "baseline_pinn",
+          "metrics": [
+            {
+              "model": "baseline_pinn",
+              "mse": 8402505728.0,
+              "mae": 82739.453125,
+              "rmse": 91665.18274677687,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 132.083251953125,
+              "dc_offset": -82739.4453125,
+              "latency_us_per_sample": 7.685294429607251,
+              "parameters": 19009
+            },
+            {
+              "model": "fourier_pinn",
+              "mse": 8403333120.0,
+              "mae": 82744.6875,
+              "rmse": 91669.69575601307,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 86.38121032714844,
+              "dc_offset": -82744.6796875,
+              "latency_us_per_sample": 16.118429473363886,
+              "parameters": 57857
+            },
+            {
+              "model": "exp_gate_rnn",
+              "mse": 8403491328.0,
+              "mae": 82745.4140625,
+              "rmse": 91670.55867616386,
+              "hf_mismatch_db": 0.0,
+              "lf_mismatch_db": 122.3773193359375,
+              "dc_offset": -82745.3984375,
+              "latency_us_per_sample": 27.599605713404863,
+              "parameters": 66305
+            }
+          ],
+          "notes": "KIT RADAR dataset. Auto resolver downloads TAR archive and selects a tabular IV file.",
+          "source_url": "https://radar.kit.edu/radar/en/dataset/rgcfRGHgZMBUkWog"
+        }
+      },
+      "aggregate": [
+        {
+          "model": "baseline_pinn",
+          "mse": 2800835242.6666718,
+          "mae": 27579.819376192678,
+          "rmse": 30555.06268449218,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 69.82406743367513,
+          "dc_offset": -27579.81389946738,
+          "latency_us_per_sample": 5.377338329148085,
+          "parameters": 19041.0
+        },
+        {
+          "model": "fourier_pinn",
+          "mse": 2801111040.0000215,
+          "mae": 27581.565471825346,
+          "rmse": 30556.569010474817,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 66.0536282857259,
+          "dc_offset": -27581.558332108078,
+          "latency_us_per_sample": 10.94110136650555,
+          "parameters": 57857.0
+        },
+        {
+          "model": "exp_gate_rnn",
+          "mse": 2801163776.00004,
+          "mae": 27581.807901814882,
+          "rmse": 30556.856680458324,
+          "hf_mismatch_db": 0.0,
+          "lf_mismatch_db": 67.7881031036377,
+          "dc_offset": -27581.802460807387,
+          "latency_us_per_sample": 17.321121225248604,
+          "parameters": 66326.33333333333
+        }
+      ]
+    }
+  }
+}
