@@ -30,7 +30,7 @@ Main manuscript results are stored in `chapter4_results_improved/`. Consolidated
 ### Installation
 
 ```bash
-git clone https://github.com/jurjsorinliviu/Psi-xLSTM.git
+git clone https://github.com/jurjsorinliviu/PSI-xLSTM.git
 cd PSI-xLSTM
 
 conda create -n psi_xlstm python=3.8
@@ -184,7 +184,7 @@ If you use this code in your research, please cite:
 
 ## Related Work
 
-- Psi-HDL: https://github.com/jurjsorinliviu/Psi-HDL
+- Psi-HDL: https://github.com/jurjsorinliviu/PSI-HDL
 - xLSTM: https://arxiv.org/abs/2405.04517
 - xLSTM-PINN: https://arxiv.org/abs/2511.12512
 
@@ -192,6 +192,18 @@ If you use this code in your research, please cite:
 
 This project is licensed under the MIT License.
 
+## Author
+
+Sorin Liviu Jurj
+
+- Email: jurjsorinliviu@yahoo.de
+- GitHub: https://github.com/jurjsorinliviu
+- LinkedIn: https://www.linkedin.com/in/jurj/
+
 ## Data Availability
 
 Source code, trained models, experiment scripts, generated Verilog-A artifacts, and reviewer experiment outputs are included in this repository. Public experimental datasets used by `run_reviewer_experiments.py` are downloaded automatically from their original sources during execution unless already present locally.
+
+## External Datasets
+
+Validation in `run_reviewer_experiments.py` uses public third-party datasets from Zenodo and KIT RADAR under CC BY 4.0 licenses. Full attribution, DOI information, and source links are listed in [DATASETS.md](DATASETS.md).
