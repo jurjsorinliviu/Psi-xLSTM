@@ -1,0 +1,4 @@
+dataset_name,best_model_hf_then_rmse,best_hf_mismatch_db,best_rmse,csv_path
+zenodo_12656947_raw,exp_gate_rnn,0.0,0.00040827096760554464,reviewer experiments\exp_experimental_suite\public_memristor_suite\downloads\zenodo_12656947_raw\auto_selected.csv
+zenodo_17481788,baseline_pinn,0.0,0.003372038917587997,reviewer experiments\exp_experimental_suite\public_memristor_suite\downloads\zenodo_17481788\auto_selected.csv
+kit_radar_memristor,baseline_pinn,0.0,91665.18274677687,reviewer experiments\exp_experimental_suite\public_memristor_suite\downloads\kit_radar_memristor\auto_selected.csv
