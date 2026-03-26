@@ -1,9 +1,10 @@
 # Ψ-xLSTM: Automated Behavioral Verilog-A Generation from Distilled Physics-Informed xLSTM Networks for High-Frequency Device Modeling
+
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-This repository contains the implementation of the research paper **"Ψ-xLSTM: Automated Behavioral Verilog-A Generation from Distilled Physics-Informed xLSTM Networks for High-Frequency Device Modeling"** which is currently under review.
+This repository contains the implementation of the research paper **"Ψ-xLSTM: Automated Behavioral Verilog-A Generation from Distilled Physics-Informed xLSTM Networks for High-Frequency Device Modeling"**.
 <img width="2816" height="1536" alt="PSI-xLSTM Methodology Pipeline" src="https://github.com/user-attachments/assets/c8e427a4-4963-49ef-9675-92e016f635d2" />
 
 ## Key Features
@@ -25,12 +26,27 @@ This repository contains the implementation of the research paper **"Ψ-xLSTM: A
 
 Main manuscript results are stored in `chapter4_results_improved/`. Consolidated reviewer experiment outputs are stored in `reviewer experiments/`.
 
+## Final Revision Experiments
+
+The final acceptance-stage revision analyses are reproduced with:
+
+```bash
+python run_final_revision_experiments.py --run-all --include-supporting-validation --use-ngspice-active-data --output-dir "final revision experiments"
+```
+
+Key outputs are written to `final revision experiments/`:
+
+- `supporting_validation/`: regenerated reviewer-validation outputs used by the final revision
+- `cross_device_analysis/`: cross-device regime metrics and regime-map figure
+- `ood_sensitivity/`: impulse-like disturbance sensitivity tables and figure
+- `final_revision_summary.json`: compact summary of the final revision artifacts
+
 ## Quick Start
 
 ### Installation
 
 ```bash
-git clone https://github.com/jurjsorinliviu/PSI-xLSTM.git
+git clone https://github.com/jurjsorinliviu/Psi-xLSTM.git
 cd PSI-xLSTM
 
 conda create -n psi_xlstm python=3.8
@@ -104,8 +120,10 @@ The `reviewer experiments/` folder contains:
 psi_xlstm/                         Main Python package
 chapter4_results_improved/         Main manuscript experiment outputs
 reviewer experiments/              Consolidated reviewer experiment outputs
+final revision experiments/        Final acceptance-revision experiment outputs
 run_chapter4_experiments_improved.py
 run_reviewer_experiments.py
+run_final_revision_experiments.py
 compare_ngspice_pytorch.py
 requirements.txt
 README.md
@@ -184,21 +202,13 @@ If you use this code in your research, please cite:
 
 ## Related Work
 
-- Psi-HDL: https://github.com/jurjsorinliviu/PSI-HDL
+- Psi-HDL: https://ieeexplore.ieee.org/document/11373324
 - xLSTM: https://arxiv.org/abs/2405.04517
 - xLSTM-PINN: https://arxiv.org/abs/2511.12512
 
 ## License
 
 This project is licensed under the MIT License.
-
-## Author
-
-Sorin Liviu Jurj
-
-- Email: jurjsorinliviu@yahoo.de
-- GitHub: https://github.com/jurjsorinliviu
-- LinkedIn: https://www.linkedin.com/in/jurj/
 
 ## Data Availability
 
