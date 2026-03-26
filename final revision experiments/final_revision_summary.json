@@ -1,0 +1,31 @@
+{
+  "config": {
+    "device": "cuda",
+    "seed": 42,
+    "epochs": 30,
+    "batch_size": 512,
+    "lr": 0.001,
+    "quick": false,
+    "use_ngspice_active_data": false,
+    "ngspice_mos_model": "bsim4"
+  },
+  "artifacts": {
+    "ood_sensitivity": {
+      "mean_metrics": [
+        {
+          "model": "baseline_pinn",
+          "peak_abs_error": 0.0001281102595385164,
+          "recovery_time_s": 2.025048161158338e-06,
+          "integrated_abs_error": 2.6263883512456232e-08
+        },
+        {
+          "model": "psi_xlstm_clustering",
+          "peak_abs_error": 0.00011540672858245671,
+          "recovery_time_s": 2.0375482563395053e-06,
+          "integrated_abs_error": 3.097113054906231e-08
+        }
+      ],
+      "note": "Impulse-like disturbance study used as a proxy for out-of-expected transient upset sensitivity."
+    }
+  }
+}
