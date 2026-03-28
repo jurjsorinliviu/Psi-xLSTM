@@ -201,8 +201,8 @@ If you use this code in your research, please cite:
 ```
 
 ## Related Work
-
-- Psi-HDL: https://ieeexplore.ieee.org/document/11373324
+- Ψ-NN: https://www.nature.com/articles/s41467-025-64624-3
+- Ψ-HDL: https://ieeexplore.ieee.org/document/11373324
 - xLSTM: https://arxiv.org/abs/2405.04517
 - xLSTM-PINN: https://arxiv.org/abs/2511.12512
 
