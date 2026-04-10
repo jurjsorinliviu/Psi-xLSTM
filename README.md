@@ -191,13 +191,16 @@ Pretrained manuscript models are available under `chapter4_results_improved/seed
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{jurj2026psixlstm,
-  title={Psi-xLSTM: Automated Behavioral Verilog-A Generation from Distilled Physics-Informed xLSTM Networks for High-Frequency Device Modeling},
+@ARTICLE{11457604,
   author={Jurj, Sorin Liviu},
-  journal={},
+  journal={IEEE Access}, 
+  title={Ψ-xLSTM: Automated Behavioral Verilog-A Generation From Distilled Physics-Informed xLSTM Networks for High-Frequency Device Modeling}, 
   year={2026},
-  note={Manuscript and code repository}
-}
+  volume={14},
+  number={},
+  pages={52272-52289},
+  keywords={Integrated circuit modeling;Standards;Computational modeling;Transient analysis;Hardware design languages;Mathematical models;Computer architecture;Accuracy;Memristors;Logic gates;Behavioral modeling;Verilog-A generation;physics-informed neural networks;xLSTM;knowledge distillation;analog circuit simulation;hardware description languages;neural network compression;high-frequency devices},
+  doi={10.1109/ACCESS.2026.3678809}}
 ```
 
 ## Related Work
