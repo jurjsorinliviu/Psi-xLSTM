@@ -7,7 +7,8 @@
 > **Author**: Sorin Liviu Jurj  
 > **Status**: Submitted
 
-![Methodology pipeline](experiments/Methodology%20Pipeline.png)
+<img width="1854" height="3250" alt="figure1_methodology_pipeline" src="https://github.com/user-attachments/assets/3264c9eb-7806-4ed2-8df4-07ed24e85445" />
+
 
 ## 🧪 Deployment and Robustness Experiment Suite (`revision/`)
 
