@@ -1,4 +1,21 @@
-"""Data generation module for Ψ-xLSTM"""
-from .memristor_generator import MemristorDataGenerator, MemristorConfig
+"""Chronological trajectory data utilities for Psi-xLSTM."""
 
-__all__ = ['MemristorDataGenerator', 'MemristorConfig']
+from .memristor_generator import (
+    MemristorConfig,
+    MemristorDataGenerator,
+    contiguous_chunks,
+    detach_state,
+    require_sequence_tensor,
+    validate_dataset,
+    validate_split,
+)
+
+__all__ = [
+    "MemristorDataGenerator",
+    "MemristorConfig",
+    "contiguous_chunks",
+    "detach_state",
+    "require_sequence_tensor",
+    "validate_dataset",
+    "validate_split",
+]
