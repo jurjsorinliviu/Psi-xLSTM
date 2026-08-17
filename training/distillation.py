@@ -1,261 +1,218 @@
-"""
-Recurrent Relation-Aware Distillation (RRAD)
-Implements equation (4) from manuscript: distillation with temporal gradient matching
-"""
+"""Sequence-safe recurrent relation-aware distillation (RRAD)."""
+
+from __future__ import annotations
+
+from typing import Dict, Optional, Tuple
 
 import torch
-import torch.nn as nn
-from typing import Tuple, Dict
+from torch import nn
+
+from data.memristor_generator import require_sequence_tensor
+from models.xlstm_teacher import _validate_time
 
 
-class RecurrentRelationAwareDistillation:
+class RecurrentRelationAwareDistillation(nn.Module):
+    """Distill chronological teacher trajectories into a recurrent student.
+
+    Both networks receive the same ordered sequence. Recurrent states may be
+    supplied only to continue the immediately preceding TBPTT chunk and the
+    caller receives the updated states for the next contiguous chunk.
     """
-    RRAD training strategy for compressing xLSTM Teacher to Ψ-xLSTM Student
-    Matches both hidden states and temporal gradients (equation 4)
-    """
-    def __init__(self,
-                 teacher: nn.Module,
-                 student: nn.Module,
-                 alpha: float = 1.0,  # Weight for hidden state matching
-                 beta: float = 0.5,   # Weight for temporal gradient matching
-                 gamma: float = 0.1):  # Weight for clustering loss
-        """
-        Initialize RRAD
-        
-        Args:
-            teacher: Trained xLSTM-PINN teacher network
-            student: Student network (ClusteringStudent or LowRankMLSTM)
-            alpha: Weight for hidden state matching loss
-            beta: Weight for temporal gradient matching loss
-            gamma: Weight for clustering/structure discovery loss
-        """
+
+    def __init__(
+        self,
+        teacher: nn.Module,
+        student: nn.Module,
+        alpha: float = 1.0,
+        beta: float = 0.5,
+        gamma: float = 0.1,
+    ):
+        super().__init__()
+        if min(alpha, beta, gamma) < 0:
+            raise ValueError("RRAD weights must be nonnegative")
+        if not hasattr(teacher, "hidden_sequence") or not hasattr(
+            student, "hidden_sequence"
+        ):
+            raise TypeError("teacher and student must expose hidden_sequence()")
         self.teacher = teacher
         self.student = student
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
-        
-        # Projection matrix to align dimensions if teacher/student differ
-        teacher_dim = teacher.hidden_size
-        student_dim = student.hidden_size
-        
-        # Get device from student model
-        device = next(student.parameters()).device
-        
-        if teacher_dim != student_dim:
-            self.W_proj = nn.Parameter(torch.randn(student_dim, teacher_dim, device=device) * 0.01)
+        self.alpha = float(alpha)
+        self.beta = float(beta)
+        self.gamma = float(gamma)
+        teacher_size = int(teacher.hidden_size)
+        student_size = int(student.hidden_size)
+        self.hidden_projection: nn.Module
+        if teacher_size == student_size:
+            self.hidden_projection = nn.Identity()
         else:
-            self.W_proj = None
-        
-        # Freeze teacher
-        for param in self.teacher.parameters():
-            param.requires_grad = False
+            self.hidden_projection = nn.Linear(student_size, teacher_size, bias=False)
+        for parameter in self.teacher.parameters():
+            parameter.requires_grad_(False)
         self.teacher.eval()
-    
-    def compute_distillation_loss(self,
-                                  V: torch.Tensor,
-                                  t: torch.Tensor,
-                                  I_true: torch.Tensor,
-                                  student_states: list = None,
-                                  teacher_states: list = None
-                                  ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """
-        Compute RRAD loss (equation 4)
-        
-        Args:
-            V: Voltage input [batch, 1]
-            t: Time input [batch, 1] (requires_grad=True)
-            I_true: Ground truth current [batch, 1]
-            student_states: Optional student LSTM states
-            teacher_states: Optional teacher LSTM states
-            
-        Returns:
-            total_loss: Combined distillation loss
-            loss_dict: Dictionary of loss components
-        """
-        # Ensure t requires grad for temporal gradient computation
+
+    def compute_distillation_loss(
+        self,
+        V: torch.Tensor,
+        t: torch.Tensor,
+        I_true: torch.Tensor,
+        student_states: Optional[list] = None,
+        teacher_states: Optional[list] = None,
+    ) -> Tuple[torch.Tensor, Dict[str, float], list, list]:
+        """Compute sequence-level RRAD losses and return propagated states."""
+        _validate_time(V, t, int(self.student.input_dim))
+        require_sequence_tensor(
+            I_true, name="I_true", feature_size=int(self.student.output_dim)
+        )
+        if I_true.shape[:2] != V.shape[:2]:
+            raise ValueError("I_true must share the input batch and sequence dimensions")
         if not t.requires_grad:
-            t = t.requires_grad_(True)
-        
-        # Forward pass through teacher (keep gradients for temporal matching)
-        with torch.set_grad_enabled(True):
-            I_teacher, h_teacher_states = self.teacher(V, t, teacher_states)
-            I_teacher = I_teacher.detach()  # Detach for non-gradient losses, but keep graph for grad computation
-        
-        # Forward pass through student
-        I_student, h_student_states = self.student(V, t, student_states)
-        
-        # Component 1: Data fitting loss (both should match ground truth)
-        loss_data_student = torch.mean((I_student - I_true) ** 2)
-        
-        # Component 2: Output matching (α * ||I_S - I_T||²)
-        # Both outputs are [batch, 1], so no projection needed
-        loss_hidden = torch.mean((I_student - I_teacher) ** 2)
-        
-        # Component 3: Temporal gradient matching (β * ||∂h_S/∂t - ∂h_T/∂t||²)
-        # Compute temporal derivatives
-        dI_student_dt = torch.autograd.grad(
-            I_student.sum(), t, create_graph=True, retain_graph=True
+            raise ValueError("t must require gradients for RRAD temporal matching")
+
+        teacher_prediction, teacher_hidden, next_teacher_states = (
+            self.teacher.hidden_sequence(V, t, teacher_states)
+        )
+        teacher_derivative = torch.autograd.grad(
+            teacher_prediction.sum(),
+            t,
+            create_graph=False,
+            retain_graph=True,
+        )[0].detach()
+        student_prediction, student_hidden, next_student_states = (
+            self.student.hidden_sequence(V, t, student_states)
+        )
+        student_derivative = torch.autograd.grad(
+            student_prediction.sum(),
+            t,
+            create_graph=True,
+            retain_graph=True,
         )[0]
-        
-        # For teacher, we need to recompute with gradients enabled temporarily
-        with torch.set_grad_enabled(True):
-            t_temp = t.detach().requires_grad_(True)
-            I_teacher_temp, _ = self.teacher(V, t_temp, teacher_states)
-            dI_teacher_dt = torch.autograd.grad(
-                I_teacher_temp.sum(), t_temp, create_graph=False
-            )[0].detach()
-        
-        loss_gradient = torch.mean((dI_student_dt - dI_teacher_dt.detach()) ** 2)
-        
-        # Component 4: Structure discovery loss (clustering or low-rank)
+
+        loss_data = torch.mean((student_prediction - I_true) ** 2)
+        loss_output = torch.mean(
+            (student_prediction - teacher_prediction.detach()) ** 2
+        )
+        projected_hidden = self.hidden_projection(student_hidden)
+        loss_hidden = torch.mean((projected_hidden - teacher_hidden.detach()) ** 2)
+        loss_gradient = torch.mean((student_derivative - teacher_derivative) ** 2)
         loss_structure = self._compute_structure_loss()
-        
-        # Total RRAD loss
-        total_loss = (loss_data_student + 
-                     self.alpha * loss_hidden + 
-                     self.beta * loss_gradient + 
-                     self.gamma * loss_structure)
-        
-        loss_dict = {
-            'total': total_loss.item(),
-            'data': loss_data_student.item(),
-            'hidden_matching': loss_hidden.item(),
-            'gradient_matching': loss_gradient.item(),
-            'structure_discovery': loss_structure.item()
+        relation_loss = loss_output + loss_hidden
+        total_loss = (
+            loss_data
+            + self.alpha * relation_loss
+            + self.beta * loss_gradient
+            + self.gamma * loss_structure
+        )
+        losses = {
+            "total": float(total_loss.detach()),
+            "data": float(loss_data.detach()),
+            "output_matching": float(loss_output.detach()),
+            "hidden_matching": float(loss_hidden.detach()),
+            "gradient_matching": float(loss_gradient.detach()),
+            "structure_discovery": float(loss_structure.detach()),
         }
-        
-        return total_loss, loss_dict
-    
+        return total_loss, losses, next_student_states, next_teacher_states
+
     def _compute_structure_loss(self) -> torch.Tensor:
-        """
-        Compute structure discovery loss
-        - For ClusteringStudent: clustering regularization
-        - For LowRankMLSTM: low-rank constraint (already implicit in architecture)
-        """
-        # Check if student has clustering loss method
-        if hasattr(self.student, 'compute_total_clustering_loss'):
+        if hasattr(self.student, "compute_total_clustering_loss"):
             return self.student.compute_total_clustering_loss()
-        else:
-            # For low-rank models, structure is implicit
-            # Could add nuclear norm regularization for stronger low-rank bias
-            return torch.tensor(0.0, device=next(self.student.parameters()).device)
-    
-    def train_step(self,
-                  optimizer: torch.optim.Optimizer,
-                  V: torch.Tensor,
-                  t: torch.Tensor,
-                  I_true: torch.Tensor
-                  ) -> Dict[str, float]:
-        """
-        Perform one training step with RRAD
-        
-        Returns:
-            loss_dict: Dictionary of loss values
-        """
-        optimizer.zero_grad()
-        
-        # Compute distillation loss
-        loss, loss_dict = self.compute_distillation_loss(V, t, I_true)
-        
-        # Backward pass
+        return next(self.student.parameters()).new_zeros(())
+
+    def train_step(
+        self,
+        optimizer: torch.optim.Optimizer,
+        V: torch.Tensor,
+        t: torch.Tensor,
+        I_true: torch.Tensor,
+        student_states: Optional[list] = None,
+        teacher_states: Optional[list] = None,
+    ) -> Tuple[Dict[str, float], list, list]:
+        optimizer.zero_grad(set_to_none=True)
+        loss, losses, next_student, next_teacher = self.compute_distillation_loss(
+            V,
+            t,
+            I_true,
+            student_states=student_states,
+            teacher_states=teacher_states,
+        )
         loss.backward()
-        
-        # Gradient clipping for stability
-        torch.nn.utils.clip_grad_norm_(self.student.parameters(), max_norm=1.0)
-        
-        # Update student
+        trainable = [
+            parameter for parameter in self.parameters() if parameter.requires_grad
+        ]
+        torch.nn.utils.clip_grad_norm_(trainable, max_norm=1.0)
         optimizer.step()
-        
-        return loss_dict
-    
-    def update_student_structure(self, epoch: int, update_interval: int = 10):
-        """
-        Periodically update structure discovery (e.g., k-means clustering)
-        
-        Args:
-            epoch: Current training epoch
-            update_interval: Update structure every N epochs
-        """
-        if epoch % update_interval == 0:
-            if hasattr(self.student, 'update_all_clusters'):
-                self.student.update_all_clusters()
-                print(f"  [Epoch {epoch}] Updated cluster assignments")
+        return losses, next_student, next_teacher
+
+    def update_student_structure(self, epoch: int, update_interval: int = 10) -> None:
+        if update_interval < 1:
+            raise ValueError("update_interval must be positive")
+        if (epoch + 1) % update_interval == 0 and hasattr(
+            self.student, "update_all_clusters"
+        ):
+            self.student.update_all_clusters()
 
 
 class StandardPINNBaseline(nn.Module):
-    """
-    Standard PINN with MLP backbone for baseline comparison
-    """
-    def __init__(self, input_dim: int = 2, hidden_sizes: list = [64, 64, 64], output_dim: int = 1):
+    """Static MLP baseline evaluated on intact sequence tensors."""
+
+    def __init__(
+        self,
+        input_dim: int = 2,
+        hidden_sizes: Optional[list[int]] = None,
+        output_dim: int = 1,
+    ):
         super().__init__()
-        
-        layers = []
-        in_dim = input_dim
-        for h_dim in hidden_sizes:
-            layers.append(nn.Linear(in_dim, h_dim))
-            layers.append(nn.Tanh())
-            in_dim = h_dim
-        layers.append(nn.Linear(in_dim, output_dim))
-        
+        hidden_sizes = hidden_sizes or [64, 64, 64]
+        if input_dim < 2 or output_dim < 1 or not hidden_sizes:
+            raise ValueError("invalid baseline dimensions")
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        layers: list[nn.Module] = []
+        current_size = input_dim
+        for hidden_size in hidden_sizes:
+            if hidden_size < 1:
+                raise ValueError("hidden sizes must be positive")
+            layers.extend((nn.Linear(current_size, hidden_size), nn.Tanh()))
+            current_size = hidden_size
+        layers.append(nn.Linear(current_size, output_dim))
         self.network = nn.Sequential(*layers)
-    
+
     def forward(self, V: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """Forward pass (no recurrent states for MLP)"""
-        x = torch.cat([V, t], dim=1)
-        return self.network(x)
-    
+        _validate_time(V, t, self.input_dim)
+        return self.network(torch.cat((V, t), dim=-1))
+
     def count_parameters(self) -> int:
-        return sum(p.numel() for p in self.parameters())
+        return sum(parameter.numel() for parameter in self.parameters())
 
 
-def create_baseline_pinn(input_dim: int = 2, hidden_size: int = 64, 
-                        num_layers: int = 3, output_dim: int = 1) -> StandardPINNBaseline:
-    """Create standard PINN baseline for comparison"""
-    hidden_sizes = [hidden_size] * num_layers
-    return StandardPINNBaseline(input_dim, hidden_sizes, output_dim)
+def create_baseline_pinn(
+    input_dim: int = 2,
+    hidden_size: int = 64,
+    num_layers: int = 3,
+    output_dim: int = 1,
+) -> StandardPINNBaseline:
+    return StandardPINNBaseline(
+        input_dim=input_dim,
+        hidden_sizes=[hidden_size] * num_layers,
+        output_dim=output_dim,
+    )
 
 
 if __name__ == "__main__":
-    # Test RRAD
-    from psi_xlstm.models.xlstm_teacher import xLSTMTeacher
-    from psi_xlstm.models.clustering_student import ClusteringStudent
-    
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    print("Testing Recurrent Relation-Aware Distillation:")
-    
-    # Create teacher and student
-    teacher = xLSTMTeacher(hidden_size=64, num_layers=2).to(device)
-    student = ClusteringStudent(hidden_size=32, num_layers=2, num_clusters=3).to(device)
-    
-    print(f"  Teacher parameters: {sum(p.numel() for p in teacher.parameters()):,}")
-    print(f"  Student parameters: {sum(p.numel() for p in student.parameters()):,}")
-    
-    # Create RRAD trainer
-    rrad = RecurrentRelationAwareDistillation(teacher, student, alpha=1.0, beta=0.5, gamma=0.1)
-    
-    # Test distillation loss
-    batch_size = 16
-    V = torch.randn(batch_size, 1, device=device)
-    t = torch.randn(batch_size, 1, device=device, requires_grad=True)
-    I_true = torch.randn(batch_size, 1, device=device)
-    
-    loss, loss_dict = rrad.compute_distillation_loss(V, t, I_true)
-    print(f"\n  Distillation Loss: {loss.item():.6f}")
-    print(f"  Loss components:")
-    for key, value in loss_dict.items():
-        print(f"    {key}: {value:.6f}")
-    
-    # Test training step
-    optimizer = torch.optim.Adam(student.parameters(), lr=1e-3)
-    loss_dict = rrad.train_step(optimizer, V, t, I_true)
-    print(f"\n  After training step:")
-    print(f"    Total loss: {loss_dict['total']:.6f}")
-    
-    # Test baseline PINN
-    print("\n  Testing baseline PINN:")
-    baseline = create_baseline_pinn(hidden_size=64, num_layers=3).to(device)
-    print(f"    Parameters: {baseline.count_parameters():,}")
-    I_pred = baseline(V, t)
-    print(f"    Output shape: {I_pred.shape}")
+    from models.clustering_student import ClusteringStudent
+    from models.xlstm_teacher import xLSTMTeacher
+
+    teacher_model = xLSTMTeacher(hidden_size=16, num_layers=2, num_heads=4)
+    student_model = ClusteringStudent(hidden_size=8, num_layers=2, num_clusters=3)
+    objective = RecurrentRelationAwareDistillation(teacher_model, student_model)
+    voltage = torch.randn(2, 8, 1)
+    time = (
+        torch.arange(8, dtype=torch.float32)
+        .view(1, 8, 1)
+        .repeat(2, 1, 1)
+        .requires_grad_(True)
+    )
+    current = torch.randn(2, 8, 1)
+    loss, components, _, _ = objective.compute_distillation_loss(
+        voltage, time, current
+    )
+    print(float(loss.detach()), components)
