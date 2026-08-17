@@ -1,354 +1,260 @@
-"""
-Evaluation Metrics for Chapter 4 Results
-Includes spectral analysis, compression metrics, and speed benchmarks
-"""
+"""Evaluation that preserves trajectory boundaries and chronological order."""
 
-import torch
-import torch.nn as nn
-import numpy as np
-from typing import Dict, Tuple
+from __future__ import annotations
+
+import json
+import os
 import time
-from scipy.fft import fft, fftfreq
+from typing import Any, Dict
+
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from scipy.fft import fft, fftfreq
+from torch import nn
+
+from data.memristor_generator import require_sequence_tensor, validate_dataset
 
 
-def compute_spectral_accuracy(I_pred: np.ndarray, 
-                              I_true: np.ndarray,
-                              dt: float,
-                              plot_path: str = None) -> Dict[str, float]:
-    """
-    Compute spectral accuracy metrics via FFT analysis
-    Measures how well model captures high-frequency components
-    
-    Args:
-        I_pred: Predicted current waveform
-        I_true: Ground truth current waveform
-        dt: Time step
-        plot_path: Optional path to save FFT comparison plot
-        
-    Returns:
-        metrics: Dictionary with spectral accuracy metrics
-    """
-    # Compute FFT
-    N = len(I_true)
-    freqs = fftfreq(N, dt)[:N//2]
-    
-    fft_pred = fft(I_pred.flatten())
-    fft_true = fft(I_true.flatten())
-    
-    # Magnitude spectra
-    mag_pred = 2.0/N * np.abs(fft_pred[:N//2])
-    mag_true = 2.0/N * np.abs(fft_true[:N//2])
-    
-    # Spectral error
-    spectral_mse = np.mean((mag_pred - mag_true) ** 2)
-    spectral_mae = np.mean(np.abs(mag_pred - mag_true))
-    
-    # High-frequency accuracy (> 10 kHz)
-    high_freq_mask = freqs > 10e3
-    if np.any(high_freq_mask):
-        high_freq_error = np.mean(np.abs(mag_pred[high_freq_mask] - mag_true[high_freq_mask]))
-    else:
-        high_freq_error = 0.0
-    
-    # Low-frequency accuracy (< 5 kHz)
-    low_freq_mask = freqs < 5e3
-    low_freq_error = np.mean(np.abs(mag_pred[low_freq_mask] - mag_true[low_freq_mask]))
-    
-    # Frequency correlation
-    freq_correlation = np.corrcoef(mag_pred, mag_true)[0, 1]
-    
+def _trajectory_array(value: np.ndarray, name: str) -> np.ndarray:
+    array = np.asarray(value)
+    if array.ndim != 3 or array.shape[0] < 1 or array.shape[1] <= 1:
+        raise ValueError(
+            f"{name} must have shape [trajectory, sequence_length, outputs] "
+            "with sequence_length > 1"
+        )
+    if not np.isfinite(array).all():
+        raise ValueError(f"{name} must contain only finite values")
+    return array
+
+
+def compute_spectral_accuracy(
+    I_pred: np.ndarray,
+    I_true: np.ndarray,
+    dt: float,
+    plot_path: str | None = None,
+    high_frequency_hz: float = 10e3,
+    low_frequency_hz: float = 5e3,
+) -> Dict[str, float]:
+    """Average per-trajectory spectra without joining unrelated sources."""
+    prediction = _trajectory_array(I_pred, "I_pred")
+    target = _trajectory_array(I_true, "I_true")
+    if prediction.shape != target.shape:
+        raise ValueError("I_pred and I_true must have identical shapes")
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+    sequence_length = target.shape[1]
+    frequencies = fftfreq(sequence_length, dt)[: sequence_length // 2]
+    predicted_spectra = np.abs(fft(prediction, axis=1)[:, : sequence_length // 2])
+    target_spectra = np.abs(fft(target, axis=1)[:, : sequence_length // 2])
+    predicted_spectra *= 2.0 / sequence_length
+    target_spectra *= 2.0 / sequence_length
+    difference = predicted_spectra - target_spectra
+    high_mask = frequencies > high_frequency_hz
+    low_mask = frequencies < low_frequency_hz
+    high_error = float(np.mean(np.abs(difference[:, high_mask]))) if high_mask.any() else 0.0
+    low_error = float(np.mean(np.abs(difference[:, low_mask]))) if low_mask.any() else 0.0
+    correlations = []
+    for trajectory in range(target.shape[0]):
+        for output in range(target.shape[2]):
+            left = predicted_spectra[trajectory, :, output]
+            right = target_spectra[trajectory, :, output]
+            if np.std(left) == 0 or np.std(right) == 0:
+                correlations.append(1.0 if np.allclose(left, right) else 0.0)
+            else:
+                correlations.append(float(np.corrcoef(left, right)[0, 1]))
     metrics = {
-        'spectral_mse': float(spectral_mse),
-        'spectral_mae': float(spectral_mae),
-        'high_freq_error': float(high_freq_error),
-        'low_freq_error': float(low_freq_error),
-        'freq_correlation': float(freq_correlation)
+        "spectral_mse": float(np.mean(difference**2)),
+        "spectral_mae": float(np.mean(np.abs(difference))),
+        "high_freq_error": high_error,
+        "low_freq_error": low_error,
+        "freq_correlation": float(np.mean(correlations)),
     }
-    
-    # Plot if requested
     if plot_path:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-        
-        # Time domain
-        t = np.arange(len(I_true)) * dt
-        ax1.plot(t[:1000], I_true[:1000], 'b-', label='Ground Truth', linewidth=2)
-        ax1.plot(t[:1000], I_pred[:1000], 'r--', label='Prediction', linewidth=1.5)
-        ax1.set_xlabel('Time (s)')
-        ax1.set_ylabel('Current (A)')
-        ax1.set_title('Time Domain: Current Waveform')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # Frequency domain
-        ax2.semilogy(freqs/1e3, mag_true, 'b-', label='Ground Truth', linewidth=2)
-        ax2.semilogy(freqs/1e3, mag_pred, 'r--', label='Prediction', linewidth=1.5)
-        ax2.axvline(x=10, color='g', linestyle=':', label='High-Freq Threshold (10 kHz)')
-        ax2.set_xlabel('Frequency (kHz)')
-        ax2.set_ylabel('Magnitude')
-        ax2.set_title('Frequency Domain: FFT Spectrum')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        ax2.set_xlim([0, 50])
-        
-        plt.tight_layout()
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"  Spectral plot saved to {plot_path}")
-    
+        os.makedirs(os.path.dirname(os.path.abspath(plot_path)), exist_ok=True)
+        time_axis = np.arange(sequence_length) * dt
+        figure, (time_axis_plot, frequency_plot) = plt.subplots(2, 1, figsize=(12, 8))
+        time_axis_plot.plot(time_axis, target[0, :, 0], label="Ground truth")
+        time_axis_plot.plot(time_axis, prediction[0, :, 0], "--", label="Prediction")
+        time_axis_plot.set(xlabel="Time (s)", ylabel="Current", title="First held-out trajectory")
+        time_axis_plot.legend()
+        time_axis_plot.grid(True, alpha=0.3)
+        frequency_plot.semilogy(
+            frequencies / 1e3, target_spectra[0, :, 0], label="Ground truth"
+        )
+        frequency_plot.semilogy(
+            frequencies / 1e3,
+            predicted_spectra[0, :, 0],
+            "--",
+            label="Prediction",
+        )
+        frequency_plot.set(xlabel="Frequency (kHz)", ylabel="Magnitude", title="Spectrum")
+        frequency_plot.legend()
+        frequency_plot.grid(True, alpha=0.3)
+        figure.tight_layout()
+        figure.savefig(plot_path, dpi=300, bbox_inches="tight")
+        plt.close(figure)
     return metrics
 
 
-def compute_compression_metrics(model: nn.Module, 
-                               model_name: str,
-                               baseline_params: int = None) -> Dict[str, any]:
-    """
-    Compute compression metrics
-    
-    Args:
-        model: PyTorch model
-        model_name: Name of model
-        baseline_params: Optional baseline parameter count for comparison
-        
-    Returns:
-        metrics: Compression statistics
-    """
-    total_params = sum(p.numel() for p in model.parameters())
-    
-    metrics = {
-        'model_name': model_name,
-        'total_parameters': total_params,
-        'model_size_mb': total_params * 4 / (1024 ** 2)  # Assuming float32
+def compute_compression_metrics(
+    model: nn.Module,
+    model_name: str,
+    baseline_params: int | None = None,
+) -> Dict[str, Any]:
+    total_parameters = sum(parameter.numel() for parameter in model.parameters())
+    metrics: Dict[str, Any] = {
+        "model_name": model_name,
+        "total_parameters": total_parameters,
+        "model_size_mb": total_parameters * 4 / 1024**2,
     }
-    
     if baseline_params is not None:
-        compression_ratio = total_params / baseline_params
-        reduction_percent = (1 - compression_ratio) * 100
-        metrics['compression_ratio'] = compression_ratio
-        metrics['reduction_percent'] = reduction_percent
-    
-    # Add model-specific metrics
-    if hasattr(model, 'count_parameters'):
-        model_specific = model.count_parameters()
-        if isinstance(model_specific, dict):
-            metrics.update(model_specific)
-        elif isinstance(model_specific, tuple):
-            orig, comp = model_specific
-            metrics['original_parameters'] = orig
-            metrics['compressed_parameters'] = comp
-        # else: single int value, already counted in total_parameters
-    
-    if hasattr(model, 'get_all_time_constants'):
-        tau_dict = model.get_all_time_constants()
-        metrics['time_constants'] = tau_dict
-    
-    if hasattr(model, 'get_eigenmode_analysis'):
-        eigenmodes = model.get_eigenmode_analysis()
-        metrics['eigenmodes'] = eigenmodes
-    
+        metrics["compression_ratio"] = total_parameters / baseline_params
+        metrics["reduction_percent"] = (
+            1.0 - total_parameters / baseline_params
+        ) * 100.0
+    if hasattr(model, "count_parameters"):
+        details = model.count_parameters()
+        if isinstance(details, dict):
+            metrics.update(details)
+        elif isinstance(details, tuple):
+            metrics["original_parameters"], metrics["compressed_parameters"] = details
+    if hasattr(model, "get_all_time_constants"):
+        metrics["time_constants"] = model.get_all_time_constants()
+    if hasattr(model, "get_eigenmode_analysis"):
+        metrics["eigenmodes"] = model.get_eigenmode_analysis()
     return metrics
 
 
-def benchmark_inference_speed(model: nn.Module,
-                             V: torch.Tensor,
-                             t: torch.Tensor,
-                             num_runs: int = 100,
-                             warmup_runs: int = 10) -> Dict[str, float]:
-    """
-    Benchmark inference speed
-    
-    Args:
-        model: Model to benchmark
-        V: Voltage input
-        t: Time input
-        num_runs: Number of benchmark runs
-        warmup_runs: Number of warmup runs
-        
-    Returns:
-        speed_metrics: Inference speed statistics
-    """
+def _predict(model: nn.Module, V: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    result = model(V, t)
+    return result[0] if isinstance(result, tuple) else result
+
+
+def benchmark_inference_speed(
+    model: nn.Module,
+    V: torch.Tensor,
+    t: torch.Tensor,
+    num_runs: int = 100,
+    warmup_runs: int = 10,
+) -> Dict[str, float]:
+    """Benchmark full-trajectory inference with state reset on every run."""
+    require_sequence_tensor(V, name="V")
+    require_sequence_tensor(t, name="t", feature_size=1)
+    if V.shape[:2] != t.shape[:2]:
+        raise ValueError("V and t must share batch and sequence dimensions")
+    if num_runs < 1 or warmup_runs < 0:
+        raise ValueError("invalid benchmark run counts")
     model.eval()
     device = next(model.parameters()).device
-    
     V = V.to(device)
     t = t.to(device)
-    
-    # Warmup
     with torch.no_grad():
         for _ in range(warmup_runs):
-            if hasattr(model, 'forward') and 'states' in model.forward.__code__.co_varnames:
-                _ = model(V, t)
-            else:
-                _ = model(V, t)
-    
-    # Benchmark
-    torch.cuda.synchronize() if device.type == 'cuda' else None
-    
-    times = []
+            _predict(model, V, t)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elapsed = []
     with torch.no_grad():
         for _ in range(num_runs):
+            if device.type == "cuda":
+                torch.cuda.synchronize()
             start = time.perf_counter()
-            
-            if hasattr(model, 'forward') and 'states' in model.forward.__code__.co_varnames:
-                _ = model(V, t)
-            else:
-                _ = model(V, t)
-            
-            torch.cuda.synchronize() if device.type == 'cuda' else None
-            end = time.perf_counter()
-            
-            times.append(end - start)
-    
-    times = np.array(times)
-    
-    metrics = {
-        'mean_time_ms': float(np.mean(times) * 1000),
-        'std_time_ms': float(np.std(times) * 1000),
-        'min_time_ms': float(np.min(times) * 1000),
-        'max_time_ms': float(np.max(times) * 1000),
-        'throughput_samples_per_sec': float(len(V) / np.mean(times))
+            _predict(model, V, t)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            elapsed.append(time.perf_counter() - start)
+    values = np.asarray(elapsed)
+    timesteps = V.shape[0] * V.shape[1]
+    return {
+        "mean_time_ms": float(values.mean() * 1000),
+        "std_time_ms": float(values.std() * 1000),
+        "min_time_ms": float(values.min() * 1000),
+        "max_time_ms": float(values.max() * 1000),
+        "latency_per_timestep_ms": float(values.mean() * 1000 / timesteps),
+        "throughput_timesteps_per_sec": float(timesteps / values.mean()),
+        "trajectories": int(V.shape[0]),
+        "sequence_length": int(V.shape[1]),
     }
-    
-    return metrics
 
 
-def compute_all_metrics(models_dict: Dict[str, nn.Module],
-                       dataset: dict,
-                       dt: float,
-                       output_dir: str = './results') -> Dict[str, Dict]:
-    """
-    Compute all metrics for all models (Chapter 4 results)
-    
-    Args:
-        models_dict: Dictionary of models {'name': model}
-        dataset: Test dataset
-        dt: Time step
-        output_dir: Directory to save plots
-        
-    Returns:
-        all_metrics: Complete metrics dictionary
-    """
-    import os
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def compute_all_metrics(
+    models_dict: Dict[str, nn.Module],
+    dataset: dict,
+    dt: float,
+    output_dir: str = "./results",
+    *,
+    device: str | None = None,
+    benchmark_runs: int = 100,
+) -> Dict[str, Dict[str, Any]]:
+    """Evaluate every model on the same intact held-out trajectories."""
+    validate_dataset(dataset)
     os.makedirs(output_dir, exist_ok=True)
-    
-    print(f"\n{'='*60}")
-    print("Computing Chapter 4 Experimental Results")
-    print(f"{'='*60}")
-    
-    all_metrics = {}
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    V_test = dataset['test']['V'].to(device)
-    t_test = dataset['test']['t'].to(device)
-    I_test = dataset['test']['I'].cpu().numpy()
-    
-    # Get baseline parameter count
-    baseline_params = None
-    if 'teacher' in models_dict:
-        baseline_params = sum(p.numel() for p in models_dict['teacher'].parameters())
-    
+    target_device = torch.device(
+        device or ("cuda" if torch.cuda.is_available() else "cpu")
+    )
+    voltage = dataset["test"]["V"].to(target_device)
+    time_values = dataset["test"]["t"].to(target_device)
+    target = dataset["test"]["I"].to(target_device)
+    teacher_parameters = None
+    if "teacher" in models_dict:
+        teacher_parameters = sum(
+            parameter.numel() for parameter in models_dict["teacher"].parameters()
+        )
+    all_metrics: Dict[str, Dict[str, Any]] = {}
     for model_name, model in models_dict.items():
-        print(f"\nEvaluating {model_name}...")
-        model = model.to(device)
-        model.eval()
-        
-        metrics = {'model_name': model_name}
-        
-        # 1. Prediction accuracy
+        model = model.to(target_device).eval()
         with torch.no_grad():
-            if hasattr(model, 'forward') and 'states' in model.forward.__code__.co_varnames:
-                I_pred, _ = model(V_test, t_test)
-            else:
-                I_pred = model(V_test, t_test)
-        
-        I_pred_np = I_pred.cpu().numpy()
-        
-        # Time-domain metrics
-        mse = np.mean((I_pred_np - I_test) ** 2)
-        mae = np.mean(np.abs(I_pred_np - I_test))
-        rmse = np.sqrt(mse)
-        
-        metrics['time_domain'] = {
-            'mse': float(mse),
-            'mae': float(mae),
-            'rmse': float(rmse)
+            prediction = _predict(model, voltage, time_values)
+        if prediction.shape != target.shape:
+            raise ValueError(
+                f"{model_name} returned {tuple(prediction.shape)}, expected "
+                f"{tuple(target.shape)}"
+            )
+        error = prediction - target
+        mse = float(torch.sum(error.square()) / target.numel())
+        mae = float(torch.sum(error.abs()) / target.numel())
+        all_metrics[model_name] = {
+            "model_name": model_name,
+            "time_domain": {"mse": mse, "mae": mae, "rmse": mse**0.5},
+            "spectral": compute_spectral_accuracy(
+                prediction.detach().cpu().numpy(),
+                target.detach().cpu().numpy(),
+                dt,
+                os.path.join(output_dir, f"{model_name}_spectral.png"),
+            ),
+            "compression": compute_compression_metrics(
+                model, model_name, teacher_parameters
+            ),
+            "speed": benchmark_inference_speed(
+                model,
+                voltage,
+                time_values,
+                num_runs=benchmark_runs,
+                warmup_runs=min(5, benchmark_runs),
+            ),
         }
-        
-        # 2. Spectral accuracy
-        plot_path = os.path.join(output_dir, f'{model_name}_spectral.png')
-        spectral_metrics = compute_spectral_accuracy(I_pred_np, I_test, dt, plot_path)
-        metrics['spectral'] = spectral_metrics
-        
-        # 3. Compression metrics
-        compression_metrics = compute_compression_metrics(model, model_name, baseline_params)
-        metrics['compression'] = compression_metrics
-        
-        # 4. Inference speed
-        speed_metrics = benchmark_inference_speed(model, V_test[:256], t_test[:256])
-        metrics['speed'] = speed_metrics
-        
-        all_metrics[model_name] = metrics
-        
-        # Print summary
-        print(f"  Time-domain MSE: {mse:.6e}")
-        print(f"  Spectral MAE: {spectral_metrics['spectral_mae']:.6e}")
-        print(f"  High-freq error: {spectral_metrics['high_freq_error']:.6e}")
-        print(f"  Parameters: {compression_metrics['total_parameters']:,}")
-        if 'reduction_percent' in compression_metrics:
-            print(f"  Compression: {compression_metrics['reduction_percent']:.1f}% reduction")
-        print(f"  Inference time: {speed_metrics['mean_time_ms']:.3f} ± {speed_metrics['std_time_ms']:.3f} ms")
-    
-    # Comparative analysis
-    print(f"\n{'='*60}")
-    print("Comparative Summary")
-    print(f"{'='*60}")
-    
-    # Create comparison table
-    print(f"\n{'Model':<20} {'Params':>12} {'Reduction':>12} {'MSE':>12} {'HF-Error':>12} {'Speed (ms)':>12}")
-    print("-" * 90)
-    
-    for model_name, metrics in all_metrics.items():
-        params = metrics['compression']['total_parameters']
-        reduction = metrics['compression'].get('reduction_percent', 0.0)
-        mse = metrics['time_domain']['mse']
-        hf_error = metrics['spectral']['high_freq_error']
-        speed = metrics['speed']['mean_time_ms']
-        
-        print(f"{model_name:<20} {params:>12,} {reduction:>11.1f}% {mse:>12.2e} {hf_error:>12.2e} {speed:>12.3f}")
-    
-    # Save metrics to file
-    import json
-    metrics_file = os.path.join(output_dir, 'chapter4_metrics.json')
-    with open(metrics_file, 'w') as f:
-        # Convert numpy arrays to lists for JSON serialization
-        json_safe_metrics = {}
-        for model_name, model_metrics in all_metrics.items():
-            json_safe_metrics[model_name] = {}
-            for key, value in model_metrics.items():
-                if isinstance(value, dict):
-                    json_safe_metrics[model_name][key] = {
-                        k: (v.tolist() if isinstance(v, np.ndarray) else v)
-                        for k, v in value.items()
-                        if not isinstance(v, dict)  # Skip nested dicts with arrays
-                    }
-                else:
-                    json_safe_metrics[model_name][key] = value
-        
-        json.dump(json_safe_metrics, f, indent=2)
-    
-    print(f"\nMetrics saved to {metrics_file}")
-    
+    with open(
+        os.path.join(output_dir, "chapter4_metrics.json"),
+        "w",
+        encoding="utf-8",
+    ) as handle:
+        json.dump(_json_safe(all_metrics), handle, indent=2)
     return all_metrics
 
 
 if __name__ == "__main__":
-    print("Testing evaluation metrics...")
-    
-    # Generate test data
-    dt = 1e-7
-    t = np.arange(0, 1e-3, dt)
-    I_true = 0.5 * np.sin(2 * np.pi * 1e3 * t) + 0.1 * np.sin(2 * np.pi * 30e3 * t)
-    I_pred = I_true + 0.05 * np.random.randn(len(I_true))
-    
-    metrics = compute_spectral_accuracy(I_pred, I_true, dt, 'test_spectral.png')
-    print("Spectral metrics:", metrics)
+    samples = np.sin(np.linspace(0, 4 * np.pi, 32))[None, :, None]
+    print(compute_spectral_accuracy(samples, samples, 1e-4))

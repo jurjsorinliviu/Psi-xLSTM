@@ -34,7 +34,7 @@ def generate_comparison_bar_plot(all_seed_metrics: List[Dict], output_path: str)
         mse_values = [m[model_name]['time_domain']['mse'] for m in all_seed_metrics]
         hf_error_values = [m[model_name]['spectral']['high_freq_error'] for m in all_seed_metrics]
         params = all_seed_metrics[0][model_name]['compression']['total_parameters']
-        latency_values = [m[model_name]['speed']['latency_per_sample_ms'] * 1000 for m in all_seed_metrics]  # Convert to μs
+        latency_values = [m[model_name]['speed']['latency_per_timestep_ms'] * 1000 for m in all_seed_metrics]
         
         aggregated[model_name] = {
             'mse_mean': np.mean(mse_values),
@@ -198,7 +198,7 @@ def generate_latex_tables(all_seed_metrics: List[Dict], output_dir: str):
     for model_name in model_names:
         mse_values = [m[model_name]['time_domain']['mse'] for m in all_seed_metrics]
         hf_values = [m[model_name]['spectral']['high_freq_error'] for m in all_seed_metrics]
-        latency_values = [m[model_name]['speed']['latency_per_sample_ms'] * 1000 for m in all_seed_metrics]
+        latency_values = [m[model_name]['speed']['latency_per_timestep_ms'] * 1000 for m in all_seed_metrics]
         params = all_seed_metrics[0][model_name]['compression']['total_parameters']
         
         mse_mean = np.mean(mse_values) * 1e8
@@ -244,8 +244,8 @@ def generate_csv_tables(all_seed_metrics: List[Dict], output_dir: str):
                 'HF_Error': m['spectral']['high_freq_error'],
                 'LF_Error': m['spectral']['low_freq_error'],
                 'Freq_Correlation': m['spectral']['freq_correlation'],
-                'Latency_ms': m['speed']['latency_per_sample_ms'],
-                'Throughput_samples_per_sec': m['speed']['throughput_samples_per_sec']
+                'Latency_per_timestep_ms': m['speed']['latency_per_timestep_ms'],
+                'Throughput_timesteps_per_sec': m['speed']['throughput_timesteps_per_sec']
             }
             rows.append(row)
         
@@ -257,7 +257,7 @@ def generate_csv_tables(all_seed_metrics: List[Dict], output_dir: str):
     for model_name in model_names:
         mse_values = [m[model_name]['time_domain']['mse'] for m in all_seed_metrics]
         hf_values = [m[model_name]['spectral']['high_freq_error'] for m in all_seed_metrics]
-        latency_values = [m[model_name]['speed']['latency_per_sample_ms'] for m in all_seed_metrics]
+        latency_values = [m[model_name]['speed']['latency_per_timestep_ms'] for m in all_seed_metrics]
         
         agg_row = {
             'Model': model_name,
