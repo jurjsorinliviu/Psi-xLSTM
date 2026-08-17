@@ -1,343 +1,323 @@
-"""
-Improved Chapter 4 Experiment Runner with All Fixes
-Addresses: speed optimization, dataset challenge, loss printing, multi-seed training
+"""Train Psi-xLSTM models through the chronological sequence API.
+
+Training is opt-in: pass ``--run-training``. Dataset items are complete source
+trajectories, recurrent state resets between them, and TBPTT state is threaded
+only through adjacent chunks from the same trajectory batch.
 """
 
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
+from __future__ import annotations
+
+import argparse
 import json
 import os
-from datetime import datetime
-from typing import Dict, List
+import random
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
-# Import Ψ-xLSTM components
-from psi_xlstm.data.memristor_generator import MemristorDataGenerator, MemristorConfig
-from psi_xlstm.models.xlstm_teacher import xLSTMTeacher
-from psi_xlstm.models.clustering_student import ClusteringStudent
-from psi_xlstm.models.lowrank_mlstm import LowRankMLSTM
-from psi_xlstm.training.distillation import StandardPINNBaseline, create_baseline_pinn
-from psi_xlstm.training.trainer import train_teacher, train_student
-from psi_xlstm.evaluation.metrics import compute_all_metrics
-from psi_xlstm.hdl_generation.xlstm_verilog_gen import XLSTMVerilogGenerator
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
+from data.memristor_generator import (
+    MemristorConfig,
+    MemristorDataGenerator,
+    validate_dataset,
+)
+from evaluation.metrics import compute_all_metrics
+from models.clustering_student import ClusteringStudent
+from models.lowrank_mlstm import LowRankMLSTM
+from models.xlstm_teacher import xLSTMTeacher
+from training.distillation import create_baseline_pinn
+from training.trainer import train_student, train_teacher
 
 
-class ImprovedExperimentRunner:
-    """Enhanced experiment runner with statistical validation"""
-    
-    def __init__(self, output_dir: str = './chapter4_results_improved'):
-        self.output_dir = output_dir
-        self.setup_directories()
-        self.config = self.create_config()
-        
-    def setup_directories(self):
-        """Create output directory structure"""
-        os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.output_dir, 'plots'), exist_ok=True)
-        os.makedirs(os.path.join(self.output_dir, 'models'), exist_ok=True)
-        os.makedirs(os.path.join(self.output_dir, 'hdl'), exist_ok=True)
-        os.makedirs(os.path.join(self.output_dir, 'seeds'), exist_ok=True)
-        
-    def create_config(self) -> dict:
-        """Create enhanced configuration"""
-        config = {
-            'experiment_name': 'Ψ-xLSTM Chapter 4 (Improved)',
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-            'output_dir': self.output_dir,
-            'num_seeds': 3,  # Full multi-seed validation for publication
-            'random_seeds': [42, 123, 456]  # Three independent runs
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def train_static_baseline(
+    model: torch.nn.Module,
+    dataset: dict,
+    *,
+    epochs: int,
+    trajectory_batch_size: int,
+    learning_rate: float,
+    device: torch.device,
+    seed: int,
+) -> tuple[torch.nn.Module, dict[str, list[float]]]:
+    """Train the declared nonrecurrent control on intact sequence tensors."""
+    validate_dataset(dataset)
+    generator = torch.Generator().manual_seed(seed)
+    trajectory_dataset = TensorDataset(
+        dataset["train"]["V"],
+        dataset["train"]["t"],
+        dataset["train"]["I"],
+    )
+    loader = DataLoader(
+        trajectory_dataset,
+        batch_size=trajectory_batch_size,
+        shuffle=True,
+        generator=generator,
+        num_workers=0,
+    )
+    model = model.to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    history = {"train_loss": []}
+    for _ in range(epochs):
+        model.train()
+        squared_error = 0.0
+        observations = 0
+        for voltage, time_values, current in loader:
+            voltage = voltage.to(device)
+            time_values = time_values.to(device)
+            current = current.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            prediction = model(voltage, time_values)
+            loss = torch.mean((prediction - current) ** 2)
+            loss.backward()
+            optimizer.step()
+            squared_error += float(torch.sum((prediction.detach() - current) ** 2))
+            observations += current.numel()
+        history["train_loss"].append(squared_error / observations)
+    return model, history
+
+
+def train_one_seed(args: argparse.Namespace, seed: int, device: torch.device):
+    set_seed(seed)
+    seed_directory = Path(args.output_dir) / "seeds" / f"seed_{seed}"
+    seed_directory.mkdir(parents=True, exist_ok=True)
+    data_config = MemristorConfig(dt=args.dt, t_max=args.t_max)
+    dataset = MemristorDataGenerator(data_config, seed=seed).generate_dataset(
+        num_sequences=args.num_sequences,
+        split_ratio=tuple(args.split_ratio),
+        device=device,
+        f_high_start=args.high_frequency_start,
+        f_high_step=args.high_frequency_step,
+        f_low_start=args.low_frequency_start,
+        f_low_step=args.low_frequency_step,
+        noise_level=args.noise_level,
+    )
+    validate_dataset(dataset)
+
+    baseline = create_baseline_pinn(
+        input_dim=2,
+        hidden_size=args.baseline_hidden_size,
+        num_layers=args.baseline_layers,
+        output_dim=1,
+    )
+    baseline, baseline_history = train_static_baseline(
+        baseline,
+        dataset,
+        epochs=args.baseline_epochs,
+        trajectory_batch_size=args.trajectory_batch_size,
+        learning_rate=args.learning_rate,
+        device=device,
+        seed=seed,
+    )
+    teacher = xLSTMTeacher(
+        input_dim=2,
+        hidden_size=args.teacher_hidden_size,
+        num_layers=args.recurrent_layers,
+        output_dim=1,
+        use_mlstm=True,
+        num_heads=args.num_heads,
+    )
+    teacher, teacher_history = train_teacher(
+        teacher,
+        dataset,
+        num_epochs=args.teacher_epochs,
+        batch_size=args.trajectory_batch_size,
+        learning_rate=args.learning_rate,
+        device=str(device),
+        save_dir=str(seed_directory),
+        chunk_length=args.chunk_length,
+        seed=seed,
+    )
+    clustered = ClusteringStudent(
+        input_dim=2,
+        hidden_size=args.student_hidden_size,
+        num_layers=args.recurrent_layers,
+        output_dim=1,
+        num_clusters=args.num_clusters,
+    )
+    clustered, clustered_history = train_student(
+        clustered,
+        teacher,
+        dataset,
+        num_epochs=args.student_epochs,
+        batch_size=args.trajectory_batch_size,
+        learning_rate=args.learning_rate,
+        device=str(device),
+        gamma=args.clustering_weight,
+        save_dir=str(seed_directory),
+        chunk_length=args.chunk_length,
+        seed=seed,
+        checkpoint_name="clustered_student_best.pth",
+    )
+    low_rank = LowRankMLSTM(
+        input_dim=2,
+        hidden_size=args.student_hidden_size,
+        num_layers=args.recurrent_layers,
+        output_dim=1,
+        rank=args.rank,
+        num_heads=args.num_heads,
+    )
+    low_rank, low_rank_history = train_student(
+        low_rank,
+        teacher,
+        dataset,
+        num_epochs=args.student_epochs,
+        batch_size=args.trajectory_batch_size,
+        learning_rate=args.learning_rate,
+        device=str(device),
+        gamma=0.0,
+        save_dir=str(seed_directory),
+        chunk_length=args.chunk_length,
+        seed=seed,
+        checkpoint_name="lowrank_student_best.pth",
+    )
+    models = {
+        "baseline_pinn": baseline,
+        "teacher": teacher,
+        "psi_xlstm_clustering": clustered,
+        "psi_xlstm_lowrank": low_rank,
+    }
+    for name, model in models.items():
+        torch.save(model.state_dict(), seed_directory / f"{name}_final.pth")
+    histories = {
+        "baseline_pinn": baseline_history,
+        "teacher": teacher_history,
+        "psi_xlstm_clustering": clustered_history,
+        "psi_xlstm_lowrank": low_rank_history,
+    }
+    with (seed_directory / "training_history.json").open(
+        "w", encoding="utf-8"
+    ) as handle:
+        json.dump(_json_safe(histories), handle, indent=2)
+    metrics = compute_all_metrics(
+        models,
+        dataset,
+        data_config.dt,
+        str(seed_directory / "evaluation"),
+        device=str(device),
+        benchmark_runs=args.benchmark_runs,
+    )
+    manifest = {
+        "seed": seed,
+        "device": str(device),
+        "canonical_shape": "[batch, sequence_length, features]",
+        "sequence_length": data_config.num_steps,
+        "source_ids": {
+            split: list(dataset[split]["source_ids"])
+            for split in ("train", "val", "test")
+        },
+        "checkpoints": {
+            name: str(seed_directory / f"{name}_final.pth") for name in models
+        },
+    }
+    with (seed_directory / "manifest.json").open("w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2)
+    return metrics
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Chronological Psi-xLSTM teacher and student training"
+    )
+    parser.add_argument(
+        "--run-training",
+        action="store_true",
+        help="required acknowledgement that model training should begin",
+    )
+    parser.add_argument("--output-dir", default="chapter4_results_sequence")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--seeds", nargs="+", type=int, default=[42, 123, 456])
+    parser.add_argument("--num-sequences", type=int, default=10)
+    parser.add_argument("--split-ratio", nargs=3, type=float, default=[0.7, 0.15, 0.15])
+    parser.add_argument("--dt", type=float, default=5e-8)
+    parser.add_argument("--t-max", type=float, default=2e-3)
+    parser.add_argument("--noise-level", type=float, default=0.03)
+    parser.add_argument("--high-frequency-start", type=float, default=50e3)
+    parser.add_argument("--high-frequency-step", type=float, default=10e3)
+    parser.add_argument("--low-frequency-start", type=float, default=1e3)
+    parser.add_argument("--low-frequency-step", type=float, default=500.0)
+    parser.add_argument("--baseline-epochs", type=int, default=50)
+    parser.add_argument("--teacher-epochs", type=int, default=100)
+    parser.add_argument("--student-epochs", type=int, default=150)
+    parser.add_argument("--trajectory-batch-size", type=int, default=2)
+    parser.add_argument("--chunk-length", type=int, default=256)
+    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--baseline-hidden-size", type=int, default=64)
+    parser.add_argument("--baseline-layers", type=int, default=3)
+    parser.add_argument("--teacher-hidden-size", type=int, default=64)
+    parser.add_argument("--student-hidden-size", type=int, default=32)
+    parser.add_argument("--recurrent-layers", type=int, default=2)
+    parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--num-clusters", type=int, default=3)
+    parser.add_argument("--rank", type=int, default=2)
+    parser.add_argument("--clustering-weight", type=float, default=0.1)
+    parser.add_argument("--benchmark-runs", type=int, default=25)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if not args.run_training:
+        print(
+            "No training started. Re-run with --run-training after reviewing the "
+            "trajectory, epoch, and device arguments."
+        )
+        return 0
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(args.device)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is not available")
+    if args.chunk_length <= 1:
+        raise ValueError("--chunk-length must be greater than one")
+    output_directory = Path(args.output_dir)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    configuration = vars(args).copy()
+    configuration.update(
+        {
+            "resolved_device": str(device),
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+            "canonical_shape": "[batch, sequence_length, features]",
+            "split_unit": "complete source trajectory",
         }
-        
-        print(f"\n{'='*70}")
-        print(f"  Ψ-xLSTM: Improved Chapter 4 Experimental Setup")
-        print(f"{'='*70}")
-        print(f"Experiment: {config['experiment_name']}")
-        print(f"Device: {config['device']}")
-        print(f"Seeds: {config['random_seeds']}")
-        print(f"Output: {config['output_dir']}")
-        print(f"{'='*70}\n")
-        
-        return config
-    
-    def generate_challenging_dataset(self, seed: int = 42):
-        """Generate MORE CHALLENGING dataset with higher frequencies"""
-        print(f"\n{'='*70}")
-        print(f"PHASE 1: Challenging Dataset Generation (seed={seed})")
-        print(f"{'='*70}")
-        
-        # Increased challenge parameters
-        memristor_config = MemristorConfig(
-            dt=5e-8,  # 50ns time step (was 100ns) - captures higher frequencies
-            t_max=2e-3  # 2ms simulation (was 1ms) - more data
-        )
-        
-        generator = MemristorDataGenerator(memristor_config)
-        generator.rng = np.random.RandomState(seed)  # Set seed for reproducibility
-        
-        # MORE SEQUENCES with HIGHER FREQUENCIES
-        dataset = generator.generate_dataset(
-            num_sequences=10,  # Was 5, now 10 for more diversity
-            split_ratio=(0.7, 0.15, 0.15),
-            device=self.config['device']
-        )
-        
-        # Override with challenging frequencies (50-150 kHz)
-        print("\nGenerating high-frequency sequences (50-150 kHz)...")
-        all_t, all_V, all_I, all_w = [], [], [], []
-        
-        for seq_idx in range(10):
-            f_high = 50e3 + seq_idx * 10e3  # 50-140 kHz (was 20-60 kHz)
-            f_low = 1e3 + seq_idx * 500
-            
-            t, V = generator.generate_voltage_waveform(f_high=f_high, f_low=f_low)
-            w_init = memristor_config.w_min + generator.rng.rand() * (memristor_config.w_max - memristor_config.w_min)
-            
-            # INCREASED NOISE for robustness testing
-            I, w = generator.simulate_transient(V, t, w_init=w_init, 
-                                               add_noise=True, noise_level=0.03)  # Was 0.01
-            
-            all_t.append(t)
-            all_V.append(V)
-            all_I.append(I)
-            all_w.append(w)
-            
-            print(f"  Seq {seq_idx+1}/10: f_high={f_high/1e3:.0f}kHz, "
-                  f"SNR={20*np.log10(np.std(I)/0.03/np.std(I)):.1f}dB")
-        
-        # Reconstruct dataset
-        t_all = np.concatenate(all_t)
-        V_all = np.concatenate(all_V)
-        I_all = np.concatenate(all_I)
-        w_all = np.concatenate(all_w)
-        
-        n_total = len(t_all)
-        n_train = int(n_total * 0.7)
-        n_val = int(n_total * 0.15)
-        
-        dataset = {
-            'train': {
-                't': torch.tensor(t_all[:n_train], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'V': torch.tensor(V_all[:n_train], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'I': torch.tensor(I_all[:n_train], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'w': torch.tensor(w_all[:n_train], dtype=torch.float32, device=self.config['device']).reshape(-1, 1)
-            },
-            'val': {
-                't': torch.tensor(t_all[n_train:n_train+n_val], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'V': torch.tensor(V_all[n_train:n_train+n_val], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'I': torch.tensor(I_all[n_train:n_train+n_val], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'w': torch.tensor(w_all[n_train:n_train+n_val], dtype=torch.float32, device=self.config['device']).reshape(-1, 1)
-            },
-            'test': {
-                't': torch.tensor(t_all[n_train+n_val:], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'V': torch.tensor(V_all[n_train+n_val:], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'I': torch.tensor(I_all[n_train+n_val:], dtype=torch.float32, device=self.config['device']).reshape(-1, 1),
-                'w': torch.tensor(w_all[n_train+n_val:], dtype=torch.float32, device=self.config['device']).reshape(-1, 1)
-            }
-        }
-        
-        print(f"\nChallenging dataset created!")
-        print(f"  Train: {len(dataset['train']['t']):,} samples")
-        print(f"  Frequency range: 50-150 kHz")
-        print(f"  Noise level: 3% (increased from 1%)")
-        
-        return dataset, memristor_config
-    
-    def train_single_run(self, dataset: dict, seed: int):
-        """Train all models for a single seed"""
-        print(f"\n{'='*70}")
-        print(f"PHASE 2-3: Model Training (seed={seed})")
-        print(f"{'='*70}")
-        
-        # Set seeds for reproducibility
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
-        
-        device = self.config['device']
-        models = {}
-        
-        # 1. Baseline PINN
-        print(f"\n[1/4] Training Baseline PINN (seed={seed})...")
-        baseline = create_baseline_pinn(2, 64, 3, 1).to(device)
-        optimizer = torch.optim.Adam(baseline.parameters(), lr=1e-3)
-        
-        for epoch in range(50):
-            total_loss = 0
-            for i in range(0, len(dataset['train']['V']), 256):
-                V_batch = dataset['train']['V'][i:i+256]
-                t_batch = dataset['train']['t'][i:i+256]
-                I_batch = dataset['train']['I'][i:i+256]
-                
-                optimizer.zero_grad()
-                I_pred = baseline(V_batch, t_batch)
-                loss = torch.mean((I_pred - I_batch) ** 2)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-            
-            if (epoch + 1) % 10 == 0:
-                print(f"  Epoch {epoch+1}/50: Loss = {total_loss:.3e}")  # Scientific notation
-        
-        models['baseline_pinn'] = baseline
-        
-        # 2. Teacher
-        print(f"\n[2/4] Training Teacher (seed={seed})...")
-        seed_dir = os.path.join(self.output_dir, 'seeds', f'seed_{seed}')
-        os.makedirs(seed_dir, exist_ok=True)
-        teacher = xLSTMTeacher(2, 64, 2, 1, use_mlstm=True, num_heads=4).to(device)
-        teacher, _ = train_teacher(teacher, dataset, num_epochs=100, device=device, save_dir=seed_dir)
-        models['teacher'] = teacher
-        
-        # 3. Clustering Student
-        print(f"\n[3/4] Training Clustering Student (seed={seed})...")
-        clustering_student = ClusteringStudent(2, 32, 2, 1, num_clusters=3).to(device)
-        clustering_student, _ = train_student(
-            clustering_student, teacher, dataset,
-            num_epochs=150, device=device, gamma=0.1, save_dir=seed_dir
-        )
-        models['psi_xlstm_clustering'] = clustering_student
-        
-        # 4. Low-Rank Student
-        print(f"\n[4/4] Training Low-Rank Student (seed={seed})...")
-        lowrank_student = LowRankMLSTM(2, 32, 2, 1, rank=2, num_heads=4).to(device)
-        lowrank_student, _ = train_student(
-            lowrank_student, teacher, dataset,
-            num_epochs=150, device=device, gamma=0.0, save_dir=seed_dir
-        )
-        models['psi_xlstm_lowrank'] = lowrank_student
-        
-        # Save final models (training functions already save best versions)
-        for name, model in models.items():
-            final_path = os.path.join(seed_dir, f'{name}_final.pth')
-            torch.save(model.state_dict(), final_path)
-        
-        return models
-    
-    def evaluate_with_statistics(self, all_runs_models: List[Dict], dataset: dict, dt: float):
-        """Evaluate all runs and compute statistics"""
-        print(f"\n{'='*70}")
-        print("PHASE 4: Statistical Evaluation")
-        print(f"{'='*70}")
-        
-        # Import improved metrics
-        from psi_xlstm.evaluation.metrics_improved import compute_all_metrics_optimized
-        
-        all_seed_metrics = []
-        
-        for seed_idx, models in enumerate(all_runs_models):
-            print(f"\nEvaluating seed {self.config['random_seeds'][seed_idx]}...")
-            metrics = compute_all_metrics_optimized(
-                models, dataset, dt,
-                output_dir=os.path.join(self.output_dir, f'plots_seed{seed_idx}')
-            )
-            all_seed_metrics.append(metrics)
-        
-        # Compute statistics across seeds
-        aggregated_metrics = self.aggregate_statistics(all_seed_metrics)
-        
-        # Print results with confidence intervals
-        self.print_results_with_ci(aggregated_metrics)
-        
-        # Generate publication-ready materials
-        from psi_xlstm.evaluation.publication_plots import generate_all_publication_materials
-        pub_dir = os.path.join(self.output_dir, 'publication_materials')
-        generate_all_publication_materials(all_seed_metrics, pub_dir)
-        
-        return aggregated_metrics
-    
-    def aggregate_statistics(self, all_metrics: List[Dict]) -> Dict:
-        """Aggregate metrics across seeds"""
-        aggregated = {}
-        model_names = all_metrics[0].keys()
-        
-        for model_name in model_names:
-            aggregated[model_name] = {}
-            
-            # Collect metrics across seeds
-            mse_values = [m[model_name]['time_domain']['mse'] for m in all_metrics]
-            hf_error_values = [m[model_name]['spectral']['high_freq_error'] for m in all_metrics]
-            speed_values = [m[model_name]['speed']['mean_time_ms'] for m in all_metrics]
-            params = all_metrics[0][model_name]['compression']['total_parameters']
-            
-            aggregated[model_name] = {
-                'mse_mean': np.mean(mse_values),
-                'mse_std': np.std(mse_values),
-                'mse_ci': 1.96 * np.std(mse_values) / np.sqrt(len(mse_values)),
-                'hf_error_mean': np.mean(hf_error_values),
-                'hf_error_std': np.std(hf_error_values),
-                'speed_mean': np.mean(speed_values),
-                'speed_std': np.std(speed_values),
-                'parameters': params
-            }
-        
-        return aggregated
-    
-    def print_results_with_ci(self, metrics: Dict):
-        """Print results with confidence intervals"""
-        print(f"\n{'='*70}")
-        print("RESULTS WITH 95% CONFIDENCE INTERVALS")
-        print(f"{'='*70}")
-        
-        print(f"\n{'Model':<25} {'MSE (mean±CI)':>25} {'HF-Error (mean±CI)':>25}")
-        print("-" * 75)
-        
-        for model_name, m in metrics.items():
-            mse_str = f"{m['mse_mean']:.2e}±{m['mse_ci']:.2e}"
-            hf_str = f"{m['hf_error_mean']:.2e}±{m['hf_error_ci'] if 'hf_error_ci' in m else 0:.2e}"
-            print(f"{model_name:<25} {mse_str:>25} {hf_str:>25}")
-        
-        # Save to JSON
-        json_path = os.path.join(self.output_dir, 'statistical_results.json')
-        with open(json_path, 'w') as f:
-            json.dump(metrics, f, indent=2)
-        print(f"\nStatistical results saved to {json_path}")
-    
-    def run_complete_experiment(self):
-        """Run complete multi-seed experiment"""
-        all_runs_models = []
-        
-        for seed in self.config['random_seeds']:
-            # Generate challenging dataset
-            dataset, memristor_config = self.generate_challenging_dataset(seed)
-            
-            # Train all models
-            models = self.train_single_run(dataset, seed)
-            all_runs_models.append(models)
-        
-        # Evaluate with statistics
-        dataset, memristor_config = self.generate_challenging_dataset(self.config['random_seeds'][0])
-        aggregated_metrics = self.evaluate_with_statistics(all_runs_models, dataset, memristor_config.dt)
-        
-        # Generate Verilog-A (use first seed models)
-        print(f"\n{'='*70}")
-        print("PHASE 5: Verilog-A Generation")
-        print(f"{'='*70}")
-        
-        best_models = all_runs_models[0]
-        hdl_dir = os.path.join(self.output_dir, 'hdl')
-        
-        if 'psi_xlstm_clustering' in best_models:
-            generator = XLSTMVerilogGenerator(best_models['psi_xlstm_clustering'], 'psi_xlstm_clustering')
-            generator.generate_hdl_package(hdl_dir)
-        
-        print(f"\n{'='*70}")
-        print("✓ IMPROVED EXPERIMENTS COMPLETED!")
-        print(f"{'='*70}")
-        print(f"\nKey Improvements:")
-        print(f"  • Dataset: 50-150 kHz (was 20-60 kHz)")
-        print(f"  • Noise: 3% (was 1%)")
-        print(f"  • Multi-seed: {len(self.config['random_seeds'])} runs with CI")
-        print(f"  • Speed: Optimized batch processing")
-        print(f"  • Loss: Scientific notation for clarity")
-        print(f"\nResults in: {self.output_dir}")
-
-
-def main():
-    runner = ImprovedExperimentRunner()
-    runner.run_complete_experiment()
+    )
+    with (output_directory / "configuration.json").open(
+        "w", encoding="utf-8"
+    ) as handle:
+        json.dump(configuration, handle, indent=2)
+    all_metrics = []
+    for seed in args.seeds:
+        all_metrics.append(train_one_seed(args, seed, device))
+    with (output_directory / "all_seed_metrics.json").open(
+        "w", encoding="utf-8"
+    ) as handle:
+        json.dump(_json_safe(all_metrics), handle, indent=2)
+    print(f"Completed {len(args.seeds)} seed(s). Results: {output_directory.resolve()}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
