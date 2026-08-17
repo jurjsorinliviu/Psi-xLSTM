@@ -328,7 +328,7 @@ if __name__ == "__main__":
     print("Testing Verilog-A generation...")
     
     # Create a dummy model for testing
-    from psi_xlstm.models.clustering_student import ClusteringStudent
+    from models.clustering_student import ClusteringStudent
     
     model = ClusteringStudent(hidden_size=32, num_layers=2, num_clusters=3)
     
