@@ -1,321 +1,304 @@
-"""
-xLSTM-PINN Teacher Network
-Implements Extended LSTM with Physics-Informed loss for high-frequency transient modeling
-"""
+"""Chronological xLSTM teacher for transient memristor modeling."""
+
+from __future__ import annotations
+
+from typing import Optional, Tuple
 
 import torch
-import torch.nn as nn
-import sys
-import os
+from torch import nn
 
-# Add xlstm-main to path for imports
-xlstm_path = os.path.join(os.path.dirname(__file__), '..', '..', 'xlstm-main')
-if xlstm_path not in sys.path:
-    sys.path.insert(0, xlstm_path)
+from data.memristor_generator import require_sequence_tensor
 
-from typing import Tuple, Optional
+
+def _validate_time(V: torch.Tensor, t: torch.Tensor, input_dim: int) -> None:
+    require_sequence_tensor(V, name="V")
+    require_sequence_tensor(t, name="t", feature_size=1)
+    if V.shape[:2] != t.shape[:2]:
+        raise ValueError("V and t must share batch and sequence dimensions")
+    if V.shape[-1] + t.shape[-1] != input_dim:
+        raise ValueError(
+            f"concatenated V/t feature size must be {input_dim}, "
+            f"got {V.shape[-1] + t.shape[-1]}"
+        )
+    if bool(torch.any(t[:, 1:] <= t[:, :-1])):
+        raise ValueError("timesteps must be strictly increasing within each trajectory")
 
 
 class SimplifiedSLSTMCell(nn.Module):
-    """
-    Simplified sLSTM cell for time-series (adapted from xlstm-main)
-    Uses exponential gating without CUDA dependencies
-    """
+    """One internal sLSTM timestep. Public training uses ``xLSTMTeacher.forward``."""
+
     def __init__(self, input_size: int, hidden_size: int, num_heads: int = 1):
         super().__init__()
+        if input_size < 1 or hidden_size < 1 or num_heads < 1:
+            raise ValueError("cell dimensions must be positive")
+        if hidden_size % num_heads:
+            raise ValueError("hidden_size must be divisible by num_heads")
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
-        
-        # Input projection to gates (i, f, c, o)
         self.W_gates = nn.Linear(input_size, 4 * hidden_size)
-        
-        # Recurrent connections (zeros initialization as per xLSTM paper)
         self.R_gates = nn.Linear(hidden_size, 4 * hidden_size, bias=False)
         nn.init.zeros_(self.R_gates.weight)
-        
-        # Forget gate bias initialization (power-law as per xlstm)
         with torch.no_grad():
-            self.W_gates.bias[hidden_size:2*hidden_size] = torch.linspace(3.0, 6.0, hidden_size)
-    
-    def forward(self, x: torch.Tensor, state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
-                ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """
-        Forward pass through sLSTM cell
-        
-        Args:
-            x: Input tensor [batch, input_size]
-            state: Tuple of (h, c) or None
-            
-        Returns:
-            h: Hidden state [batch, hidden_size]
-            (h, c): New state tuple
-        """
-        batch_size = x.size(0)
-        
+            self.W_gates.bias[hidden_size : 2 * hidden_size] = torch.linspace(
+                3.0, 6.0, hidden_size
+            )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        if x.ndim != 2 or x.shape[-1] != self.input_size:
+            raise ValueError(
+                f"cell input must have shape [batch, {self.input_size}]"
+            )
+        batch_size = x.shape[0]
         if state is None:
-            h = torch.zeros(batch_size, self.hidden_size, device=x.device, dtype=x.dtype)
-            c = torch.zeros(batch_size, self.hidden_size, device=x.device, dtype=x.dtype)
+            hidden = x.new_zeros(batch_size, self.hidden_size)
+            memory = x.new_zeros(batch_size, self.hidden_size)
         else:
-            h, c = state
-        
-        # Compute gates
-        gates = self.W_gates(x) + self.R_gates(h)
-        
-        # Split into individual gates
-        i, f, g, o = gates.chunk(4, dim=1)
-        
-        # Apply activations (exponential for i, sigmoid/exp for f as per xLSTM)
-        i = torch.exp(i)  # Exponential input gate (key xLSTM innovation)
-        f = torch.sigmoid(f)  # Forget gate (can also use exp, but sigmoid is stable)
-        g = torch.tanh(g)     # Cell gate
-        o = torch.sigmoid(o)  # Output gate
-        
-        # Update cell state
-        c_new = f * c + i * g
-        
-        # Compute hidden state
-        h_new = o * torch.tanh(c_new)
-        
-        return h_new, (h_new, c_new)
+            hidden, memory = state
+            expected = (batch_size, self.hidden_size)
+            if hidden.shape != expected or memory.shape != expected:
+                raise ValueError("invalid sLSTM state shape")
+        gates = self.W_gates(x) + self.R_gates(hidden)
+        input_gate, forget_gate, candidate, output_gate = gates.chunk(4, dim=-1)
+        input_gate = torch.exp(input_gate.clamp(max=10.0))
+        forget_gate = torch.sigmoid(forget_gate)
+        candidate = torch.tanh(candidate)
+        output_gate = torch.sigmoid(output_gate)
+        next_memory = forget_gate * memory + input_gate * candidate
+        next_hidden = output_gate * torch.tanh(next_memory)
+        return next_hidden, (next_hidden, next_memory)
 
 
 class SimplifiedMLSTMCell(nn.Module):
-    """
-    Simplified mLSTM cell with matrix memory
-    Adapted from xlstm-main/xlstm/blocks/mlstm/cell.py
-    """
+    """One internal matrix-memory timestep."""
+
     def __init__(self, input_size: int, hidden_size: int, num_heads: int = 4):
         super().__init__()
+        if input_size < 1 or hidden_size < 1 or num_heads < 1:
+            raise ValueError("cell dimensions must be positive")
+        if hidden_size % num_heads:
+            raise ValueError("hidden_size must be divisible by num_heads")
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
-        
-        # Query, Key, Value projections
         self.W_q = nn.Linear(input_size, hidden_size)
         self.W_k = nn.Linear(input_size, hidden_size)
         self.W_v = nn.Linear(input_size, hidden_size)
-        
-        # Input and forget gates (computed from q, k, v)
         self.igate = nn.Linear(input_size, num_heads)
         self.fgate = nn.Linear(input_size, num_heads)
-        
-        # Output normalization
         self.out_norm = nn.LayerNorm(hidden_size)
-        
-        # Initialize forget gate bias (as per xlstm)
         with torch.no_grad():
             nn.init.zeros_(self.fgate.weight)
-            self.fgate.bias.data = torch.linspace(3.0, 6.0, num_heads)
+            self.fgate.bias.copy_(torch.linspace(3.0, 6.0, num_heads))
             nn.init.zeros_(self.igate.weight)
             nn.init.normal_(self.igate.bias, mean=0.0, std=0.1)
-    
-    def forward(self, x: torch.Tensor, 
-                state: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None
-                ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """
-        Forward pass through mLSTM cell
-        
-        Args:
-            x: Input [batch, input_size]
-            state: Tuple of (C, n, m) matrix memory states or None
-            
-        Returns:
-            h: Output [batch, hidden_size]
-            new_state: Updated (C, n, m) tuple
-        """
-        batch_size = x.size(0)
-        
-        # Project to q, k, v
-        q = self.W_q(x).view(batch_size, self.num_heads, self.head_dim)  # [B, NH, DH]
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        state: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[
+        torch.Tensor,
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    ]:
+        if x.ndim != 2 or x.shape[-1] != self.input_size:
+            raise ValueError(
+                f"cell input must have shape [batch, {self.input_size}]"
+            )
+        batch_size = x.shape[0]
+        q = self.W_q(x).view(batch_size, self.num_heads, self.head_dim)
         k = self.W_k(x).view(batch_size, self.num_heads, self.head_dim)
         v = self.W_v(x).view(batch_size, self.num_heads, self.head_dim)
-        
-        # Compute gates - need proper shape for broadcasting
-        i = torch.exp(self.igate(x)).unsqueeze(-1).unsqueeze(-1)  # [B, NH, 1, 1]
-        f = torch.sigmoid(self.fgate(x)).unsqueeze(-1).unsqueeze(-1)  # [B, NH, 1, 1]
-        
-        # Initialize state if needed
+        k = k / (torch.linalg.vector_norm(k, dim=-1, keepdim=True) + 1e-8)
+        input_gate = torch.exp(self.igate(x).clamp(max=10.0)).unsqueeze(-1).unsqueeze(-1)
+        forget_gate = torch.sigmoid(self.fgate(x)).unsqueeze(-1).unsqueeze(-1)
         if state is None:
-            C = torch.zeros(batch_size, self.num_heads, self.head_dim, self.head_dim,
-                          device=x.device, dtype=x.dtype)
-            n = torch.zeros(batch_size, self.num_heads, self.head_dim, 1,
-                          device=x.device, dtype=x.dtype)
-            m = torch.zeros(batch_size, self.num_heads, 1, 1,
-                          device=x.device, dtype=x.dtype)
+            matrix = x.new_zeros(
+                batch_size, self.num_heads, self.head_dim, self.head_dim
+            )
+            normalizer = x.new_zeros(batch_size, self.num_heads, self.head_dim, 1)
+            stabilizer = x.new_zeros(batch_size, self.num_heads, 1, 1)
         else:
-            C, n, m = state
-        
-        # Matrix memory update: C_t = f_t * C_{t-1} + i_t * (v_t @ k_t^T)
-        # All shapes: C [B, NH, DH, DH], i/f [B, NH, 1, 1], v/k [B, NH, DH]
-        C_new = f * C + i * (v.unsqueeze(-1) @ k.unsqueeze(-2))
-        # For n: [B, NH, DH, 1], need f/i as [B, NH, 1, 1]
-        n_new = f * n + i * v.unsqueeze(-1)
-        # For m: [B, NH, 1, 1], f and i already have right shape
-        m_new = f * m + i
-        
-        # Compute output: h = C_t @ q_t / (n_t^T @ q_t + m_t + eps)
-        numerator = torch.matmul(C_new, q.unsqueeze(-1)).squeeze(-1)  # [B, NH, DH]
-        # denominator: [B, NH, 1, DH] @ [B, NH, DH, 1] = [B, NH, 1, 1]
-        denominator = torch.matmul(n_new.transpose(-2, -1), q.unsqueeze(-1)) + m_new + 1e-6
-        
-        h = numerator / denominator.squeeze(-1).squeeze(-1).unsqueeze(-1)  # Broadcast to [B, NH, DH]
-        
-        # Reshape and normalize
-        h = h.reshape(batch_size, self.hidden_size)
-        h = self.out_norm(h)
-        
-        return h, (C_new, n_new, m_new)
+            matrix, normalizer, stabilizer = state
+            if matrix.shape != (
+                batch_size,
+                self.num_heads,
+                self.head_dim,
+                self.head_dim,
+            ):
+                raise ValueError("invalid mLSTM matrix-state shape")
+            if normalizer.shape != (batch_size, self.num_heads, self.head_dim, 1):
+                raise ValueError("invalid mLSTM normalizer-state shape")
+            if stabilizer.shape != (batch_size, self.num_heads, 1, 1):
+                raise ValueError("invalid mLSTM stabilizer-state shape")
+        next_matrix = forget_gate * matrix + input_gate * (
+            v.unsqueeze(-1) @ k.unsqueeze(-2)
+        )
+        next_normalizer = forget_gate * normalizer + input_gate * k.unsqueeze(-1)
+        next_stabilizer = forget_gate * stabilizer + input_gate
+        numerator = torch.matmul(next_matrix, q.unsqueeze(-1)).squeeze(-1)
+        denominator = (
+            torch.matmul(next_normalizer.transpose(-2, -1), q.unsqueeze(-1))
+            + next_stabilizer
+        )
+        denominator = denominator.squeeze(-1).squeeze(-1).unsqueeze(-1)
+        denominator = torch.where(
+            denominator.abs() < 1e-6,
+            torch.full_like(denominator, 1e-6),
+            denominator,
+        )
+        hidden = self.out_norm((numerator / denominator).reshape(batch_size, self.hidden_size))
+        return hidden, (next_matrix, next_normalizer, next_stabilizer)
 
 
 class xLSTMTeacher(nn.Module):
-    """
-    xLSTM-PINN Teacher network for high-frequency transient modeling
-    Combines sLSTM and mLSTM blocks with physics-informed training
-    """
-    def __init__(self, 
-                 input_dim: int = 2,  # [V, t]
-                 hidden_size: int = 64,
-                 num_layers: int = 2,
-                 output_dim: int = 1,  # Current I
-                 use_mlstm: bool = True,
-                 num_heads: int = 4):
+    """Sequence-only xLSTM teacher with explicit recurrent state threading."""
+
+    def __init__(
+        self,
+        input_dim: int = 2,
+        hidden_size: int = 64,
+        num_layers: int = 2,
+        output_dim: int = 1,
+        use_mlstm: bool = True,
+        num_heads: int = 4,
+    ):
         super().__init__()
-        
+        if input_dim < 2 or hidden_size < 1 or num_layers < 1 or output_dim < 1:
+            raise ValueError("model dimensions are invalid")
+        if hidden_size % num_heads:
+            raise ValueError("hidden_size must be divisible by num_heads")
         self.input_dim = input_dim
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.output_dim = output_dim
         self.use_mlstm = use_mlstm
-        
-        # Input embedding
         self.input_proj = nn.Linear(input_dim, hidden_size)
-        
-        # xLSTM layers (alternating sLSTM and mLSTM as per paper)
-        self.lstm_cells = nn.ModuleList()
-        for i in range(num_layers):
-            if use_mlstm and i % 2 == 1:
-                self.lstm_cells.append(SimplifiedMLSTMCell(hidden_size, hidden_size, num_heads))
+        cells: list[nn.Module] = []
+        for layer_index in range(num_layers):
+            if use_mlstm and layer_index % 2 == 1:
+                cells.append(SimplifiedMLSTMCell(hidden_size, hidden_size, num_heads))
             else:
-                self.lstm_cells.append(SimplifiedSLSTMCell(hidden_size, hidden_size, num_heads))
-        
-        # Output projection
+                cells.append(SimplifiedSLSTMCell(hidden_size, hidden_size, num_heads))
+        self.lstm_cells = nn.ModuleList(cells)
         self.output_proj = nn.Linear(hidden_size, output_dim)
-        
-    def forward(self, V: torch.Tensor, t: torch.Tensor, 
-                states: Optional[list] = None) -> Tuple[torch.Tensor, list]:
-        """
-        Forward pass through xLSTM-PINN
-        
-        Args:
-            V: Voltage input [batch, 1]
-            t: Time input [batch, 1]
-            states: List of LSTM states or None
-            
-        Returns:
-            I_pred: Predicted current [batch, 1]
-            new_states: Updated LSTM states
-        """
-        # Concatenate inputs
-        x = torch.cat([V, t], dim=1)
-        
-        # Input embedding
-        h = self.input_proj(x)
-        
-        # Initialize states if needed
+
+    def _step(self, x_t: torch.Tensor, states: list | None):
         if states is None:
             states = [None] * self.num_layers
-        
-        # Pass through xLSTM layers
-        new_states = []
-        for i, cell in enumerate(self.lstm_cells):
-            h, state = cell(h, states[i])
-            new_states.append(state)
-        
-        # Output projection
-        I_pred = self.output_proj(h)
-        
-        return I_pred, new_states
-    
-    def compute_physics_loss(self, V: torch.Tensor, t: torch.Tensor, 
-                           I_pred: torch.Tensor, I_true: torch.Tensor,
-                           vteam_params: dict,
-                           lambda_data: float = 1.0,
-                           lambda_pde: float = 0.1,
-                           lambda_ic: float = 0.1) -> Tuple[torch.Tensor, dict]:
+        if len(states) != self.num_layers:
+            raise ValueError(f"states must contain {self.num_layers} layer states")
+        hidden = self.input_proj(x_t)
+        next_states = []
+        for cell, state in zip(self.lstm_cells, states):
+            hidden, next_state = cell(hidden, state)
+            next_states.append(next_state)
+        return self.output_proj(hidden), next_states, hidden
+
+    def forward(
+        self,
+        V: torch.Tensor,
+        t: torch.Tensor,
+        states: Optional[list] = None,
+    ) -> Tuple[torch.Tensor, list]:
+        """Process a complete ordered sequence.
+
+        ``V`` and ``t`` must be three-dimensional, with sequence length greater
+        than one. State is advanced once per chronological timestep.
         """
-        Compute physics-informed loss
-        
-        Args:
-            V: Voltage [batch, 1]
-            t: Time [batch, 1] (requires_grad=True for AD)
-            I_pred: Predicted current
-            I_true: Ground truth current
-            vteam_params: VTEAM model parameters
-            lambda_data: Weight for data loss
-            lambda_pde: Weight for PDE residual
-            lambda_ic: Weight for initial condition
-            
-        Returns:
-            total_loss: Combined loss
-            losses: Dictionary of individual loss components
-        """
-        # Data loss (MSE)
+        _validate_time(V, t, self.input_dim)
+        x = torch.cat((V, t), dim=-1)
+        outputs = []
+        next_states = states
+        for timestep in range(x.shape[1]):
+            output, next_states, _ = self._step(x[:, timestep], next_states)
+            outputs.append(output)
+        return torch.stack(outputs, dim=1), next_states
+
+    def hidden_sequence(
+        self,
+        V: torch.Tensor,
+        t: torch.Tensor,
+        states: Optional[list] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, list]:
+        """Return predictions and final-layer hidden values for RRAD."""
+        _validate_time(V, t, self.input_dim)
+        x = torch.cat((V, t), dim=-1)
+        outputs = []
+        hidden_values = []
+        next_states = states
+        for timestep in range(x.shape[1]):
+            output, next_states, hidden = self._step(x[:, timestep], next_states)
+            outputs.append(output)
+            hidden_values.append(hidden)
+        return (
+            torch.stack(outputs, dim=1),
+            torch.stack(hidden_values, dim=1),
+            next_states,
+        )
+
+    def step(
+        self,
+        V_t: torch.Tensor,
+        t_t: torch.Tensor,
+        states: Optional[list] = None,
+    ) -> Tuple[torch.Tensor, list]:
+        """Advance one physical timestep for streaming inference only."""
+        if V_t.ndim != 2 or t_t.ndim != 2 or t_t.shape[-1] != 1:
+            raise ValueError("step inputs must be [batch, features]")
+        if V_t.shape[0] != t_t.shape[0] or V_t.shape[-1] + 1 != self.input_dim:
+            raise ValueError("invalid streaming feature dimensions")
+        output, next_states, _ = self._step(torch.cat((V_t, t_t), dim=-1), states)
+        return output, next_states
+
+    def compute_physics_loss(
+        self,
+        V: torch.Tensor,
+        t: torch.Tensor,
+        I_pred: torch.Tensor,
+        I_true: torch.Tensor,
+        vteam_params: dict,
+        lambda_data: float = 1.0,
+        lambda_pde: float = 0.1,
+        lambda_ic: float = 0.1,
+    ) -> Tuple[torch.Tensor, dict]:
+        """Compute sequence-weighted data, temporal, and initial losses."""
+        del vteam_params
+        _validate_time(V, t, self.input_dim)
+        require_sequence_tensor(I_pred, name="I_pred", feature_size=self.output_dim)
+        require_sequence_tensor(I_true, name="I_true", feature_size=self.output_dim)
+        if I_pred.shape != I_true.shape or I_pred.shape[:2] != V.shape[:2]:
+            raise ValueError("prediction and target shapes must match the input sequence")
         loss_data = torch.mean((I_pred - I_true) ** 2)
-        
-        # PDE loss: ∂I/∂t should match physics-based rate
-        # For memristor: I = V / R(w), so ∂I/∂t involves ∂w/∂t
-        # Simplified: check temporal consistency
         if t.requires_grad:
-            dI_dt = torch.autograd.grad(
+            derivative = torch.autograd.grad(
                 I_pred.sum(), t, create_graph=True, retain_graph=True
             )[0]
-            
-            # Physical constraint: dI/dt should be bounded by RC time constant
-            # For high-frequency: |dI/dt| < V_max * C / (R * dt)
-            max_di_dt = 1e6  # Physical limit (A/s)
-            loss_pde = torch.mean(torch.relu(torch.abs(dI_dt) - max_di_dt) ** 2)
+            maximum_derivative = 1e6
+            loss_pde = torch.mean(
+                torch.relu(torch.abs(derivative) - maximum_derivative) ** 2
+            )
         else:
-            loss_pde = torch.tensor(0.0, device=I_pred.device)
-        
-        # Initial condition loss (enforce continuity)
-        loss_ic = torch.mean((I_pred[0] - I_true[0]) ** 2)
-        
-        # Total loss
-        total_loss = (lambda_data * loss_data + 
-                     lambda_pde * loss_pde + 
-                     lambda_ic * loss_ic)
-        
-        losses = {
-            'total': total_loss.item(),
-            'data': loss_data.item(),
-            'pde': loss_pde.item() if isinstance(loss_pde, torch.Tensor) else 0.0,
-            'ic': loss_ic.item()
+            loss_pde = I_pred.new_zeros(())
+        loss_ic = torch.mean((I_pred[:, 0] - I_true[:, 0]) ** 2)
+        total = lambda_data * loss_data + lambda_pde * loss_pde + lambda_ic * loss_ic
+        return total, {
+            "total": float(total.detach()),
+            "data": float(loss_data.detach()),
+            "pde": float(loss_pde.detach()),
+            "ic": float(loss_ic.detach()),
         }
-        
-        return total_loss, losses
 
 
 if __name__ == "__main__":
-    # Test xLSTM Teacher
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = xLSTMTeacher(hidden_size=32, num_layers=2).to(device)
-    
-    # Test forward pass
-    batch_size = 16
-    V = torch.randn(batch_size, 1, device=device)
-    t = torch.randn(batch_size, 1, device=device, requires_grad=True)
-    
-    I_pred, states = model(V, t)
-    print(f"xLSTM Teacher test:")
-    print(f"  Input: V{V.shape}, t{t.shape}")
-    print(f"  Output: I_pred{I_pred.shape}")
-    print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
-    
-    # Test physics loss
-    I_true = torch.randn_like(I_pred)
-    loss, loss_dict = model.compute_physics_loss(V, t, I_pred, I_true, {})
-    print(f"  Loss: {loss.item():.6f}")
-    print(f"  Loss components: {loss_dict}")
+    model = xLSTMTeacher(hidden_size=16, num_layers=2, num_heads=4)
+    voltage = torch.randn(2, 8, 1)
+    time = torch.arange(8, dtype=torch.float32).view(1, 8, 1).repeat(2, 1, 1)
+    prediction, final_state = model(voltage, time)
+    print(tuple(prediction.shape), len(final_state))
